@@ -3,13 +3,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <meta name="theme-color" content="#1a1a2e">
+  <meta name="theme-color" content="#0d1a2a">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Visitas">
+  <meta name="apple-mobile-web-app-title" content="Datos Almas">
   <link rel="manifest" href="manifest.json">
-  <link rel="apple-touch-icon" href="icons/icon-192.png">
-  <title>Seguimiento de Visitas</title>
+  <link rel="apple-touch-icon" href="Logo_Siquem_Blanco.png">
+  <title>Datos Almas · Siquem Iglesia Pergamino</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Serif+Display&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
@@ -21,8 +22,10 @@
   <div class="login-bg"></div>
   <div class="login-wrap">
     <div class="login-logo">
-      <div class="logo-cross">✦</div>
-      <h1>Visitas</h1>
+      <div class="login-logo-img">
+        <img src="Logo_Siquem_Blanco.png" alt="Siquem">
+      </div>
+      <h1>Datos Almas<span>Siquem Iglesia Pergamino</span></h1>
       <p>Sistema de seguimiento pastoral</p>
     </div>
     <div class="login-card">
@@ -46,9 +49,11 @@
   <!-- HEADER -->
   <header class="app-header">
     <div class="header-left">
-      <div class="header-logo">✦</div>
+      <div class="header-logo">
+        <img src="Logo_Siquem_Blanco.png" alt="Siquem">
+      </div>
       <div>
-        <div class="header-title">Visitas</div>
+        <div class="header-title">Datos Almas</div>
         <div class="header-user" id="header-user"></div>
       </div>
     </div>
@@ -92,7 +97,7 @@
     <div id="page-inicio" class="page active">
       <div class="page-header">
         <h2 id="inicio-saludo">Buenos días</h2>
-        <p class="page-subtitle">Resumen de seguimiento</p>
+        <p class="page-subtitle">Resumen de seguimiento · Siquem Iglesia Pergamino</p>
       </div>
       <div class="stats-row" id="stats-row"></div>
       <section class="section">
@@ -111,7 +116,7 @@
       </section>
     </div>
 
-    <!-- NUEVA VISITA (solo admin) -->
+    <!-- NUEVA VISITA -->
     <div id="page-nueva" class="page">
       <div class="page-header">
         <h2>Nueva visita</h2>
@@ -170,7 +175,7 @@
       <div id="list-mis-asignados"></div>
     </div>
 
-    <!-- TODAS LAS VISITAS (admin) -->
+    <!-- TODAS LAS VISITAS -->
     <div id="page-todas" class="page">
       <div class="page-header">
         <h2>Todas las visitas</h2>
@@ -184,7 +189,7 @@
       <div id="list-todas"></div>
     </div>
 
-    <!-- EQUIPO (admin) -->
+    <!-- EQUIPO -->
     <div id="page-encargados" class="page">
       <div class="page-header">
         <h2>Equipo</h2>
@@ -257,7 +262,6 @@
 <!-- TOAST -->
 <div id="toast" class="toast"></div>
 
-<!-- Firebase -->
 <script type="module" src="app.js"></script>
 </body>
 </html>
