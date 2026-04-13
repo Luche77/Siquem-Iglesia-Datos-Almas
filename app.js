@@ -39,8 +39,8 @@ window.doLogin = async function() {
   if (!usuario || !pass) { showError('Completá usuario y contraseña'); return; }
 
   try {
-    // Admin por defecto (primer usuario)
-    if (usuario === 'admin' && pass === 'admin123') {
+    // Admin por defecto — cambiá 'admin123' por tu contraseña segura
+    if (usuario === 'admin' && pass === 'nuevatemporada1304') {
       currentUser = { id: 'admin', nombre: 'Administrador', rol: 'admin', usuario: 'admin' };
       sessionStorage.setItem('cv_user', JSON.stringify(currentUser));
       iniciarApp();
@@ -411,6 +411,34 @@ window.abrirModal = async function(id) {
       </div>`).join('')
     : `<div style="font-size:13px;color:var(--text3);padding:8px 0">Sin contactos registrados aún</div>`;
 
+  // Botón eliminar — solo visible para admin
+  const btnEliminar = currentUser.rol === 'admin' ? `
+    <button onclick="eliminarVisita('${v.id}')" style="
+      width:100%;
+      margin-top:12px;
+      padding:11px 16px;
+      background:transparent;
+      color:#e05555;
+      border:1.5px solid #e05555;
+      border-radius:10px;
+      font-size:14px;
+      font-weight:500;
+      cursor:pointer;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:7px;
+    ">
+      <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <polyline points="3 6 5 6 21 6"/>
+        <path d="M19 6l-1 14H6L5 6"/>
+        <path d="M10 11v6"/>
+        <path d="M14 11v6"/>
+        <path d="M9 6V4h6v2"/>
+      </svg>
+      Eliminar visita
+    </button>` : '';
+
   document.getElementById('modal-content').innerHTML = `
     <div class="modal-inner">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
@@ -435,6 +463,7 @@ window.abrirModal = async function(id) {
         Llamar
       </a>
     </div>
+    ${btnEliminar}
 
     <div class="seguimiento-section">
       <div class="seguimiento-title">Historial de contactos</div>
@@ -473,6 +502,19 @@ window.abrirModal = async function(id) {
 window.cerrarModal = function(e) {
   if (!e || e.target === document.getElementById('modal-bg'))
     document.getElementById('modal-bg').classList.remove('open');
+};
+
+// ─── ELIMINAR VISITA (solo admin) ────────────────────────────────────────────
+window.eliminarVisita = async function(id) {
+  if (!confirm('¿Seguro que querés eliminar esta visita?\nEsta acción no se puede deshacer.')) return;
+  try {
+    await deleteDoc(doc(db, 'visitas', id));
+    document.getElementById('modal-bg').classList.remove('open');
+    showToast('Visita eliminada correctamente');
+  } catch(e) {
+    showToast('Error al eliminar. Revisá la conexión.');
+    console.error(e);
+  }
 };
 
 // ─── GUARDAR SEGUIMIENTO ─────────────────────────────────────────────────────
