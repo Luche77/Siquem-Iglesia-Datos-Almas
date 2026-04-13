@@ -1,11 +1,8 @@
 // ─── CONFIGURACIÓN FIREBASE ─────────────────────────────────────────────────
-// ⚠️  REEMPLAZÁ estos valores con los de TU proyecto Firebase
-// Instrucciones en INSTALACION.md
-
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import {
-  getFirestore, collection, doc, addDoc, setDoc, updateDoc, deleteDoc,
-  getDocs, getDoc, query, where, orderBy, onSnapshot, serverTimestamp
+  getFirestore, collection, doc, addDoc, updateDoc, deleteDoc,
+  getDocs, query, where, onSnapshot, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -40,7 +37,7 @@ window.doLogin = async function() {
 
   try {
     // Admin por defecto — cambiá 'admin123' por tu contraseña segura
-    if (usuario === 'admin' && pass === 'nuevatemporada1304') {
+    if (usuario === 'admin' && pass === 'admin123') {
       currentUser = { id: 'admin', nombre: 'Administrador', rol: 'admin', usuario: 'admin' };
       sessionStorage.setItem('cv_user', JSON.stringify(currentUser));
       iniciarApp();
@@ -85,21 +82,17 @@ async function iniciarApp() {
   document.getElementById('header-user').textContent =
     `${currentUser.nombre} · ${currentUser.rol === 'admin' ? 'Administrador' : 'Encargado'}`;
 
-  // Saludo según hora
   const h = new Date().getHours();
   const saludo = h < 12 ? 'Buenos días' : h < 19 ? 'Buenas tardes' : 'Buenas noches';
   document.getElementById('inicio-saludo').textContent = `${saludo}, ${currentUser.nombre.split(' ')[0]}`;
 
-  // Mostrar/ocultar nav según rol
   const isAdmin = currentUser.rol === 'admin';
   document.getElementById('nav-nueva').style.display = isAdmin ? '' : 'none';
   document.getElementById('nav-todas').style.display = isAdmin ? '' : 'none';
   document.getElementById('nav-encargados').style.display = isAdmin ? '' : 'none';
 
-  // Fecha de hoy en el form
   document.getElementById('f-fecha').value = new Date().toISOString().split('T')[0];
 
-  // Escuchar datos en tiempo real
   escucharVisitas();
   escucharEncargados();
   escucharNotificaciones();
@@ -135,7 +128,7 @@ function escucharNotificaciones() {
   });
 }
 
-// ─── HELPERS FECHA ───────────────────────────────────────────────────────────
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
 function hoy() { const d = new Date(); d.setHours(0,0,0,0); return d; }
 
 function diasDesde(fechaStr) {
@@ -276,26 +269,43 @@ function renderEncargados() {
         <span class="cat-label ${catClass(e.cat)}">${catLabel(e.cat)}</span>
         <span class="enc-badge ${e.rol === 'admin' ? 'rol-admin' : 'rol-enc'}" style="margin-left:6px">${e.rol === 'admin' ? 'Admin' : 'Encargado'}</span>
       </div>
-      <div class="enc-stats"><div class="enc-cnt">${asignadas}</div><div class="enc-cnt-l">asignadas</div></div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+        <div class="enc-stats"><div class="enc-cnt">${asignadas}</div><div class="enc-cnt-l">asignadas</div></div>
+        <button class="btn-eliminar-enc" onclick="event.stopPropagation();eliminarEncargado('${e.id}','${e.nombre}')" title="Eliminar encargado">
+          <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6l-1 14H6L5 6"/>
+            <path d="M10 11v6"/><path d="M14 11v6"/>
+            <path d="M9 6V4h6v2"/>
+          </svg>
+        </button>
+      </div>
     </div>`;
   }).join('');
 }
+
+// ─── ELIMINAR ENCARGADO (solo admin) ─────────────────────────────────────────
+window.eliminarEncargado = async function(id, nombre) {
+  if (!confirm(`¿Seguro que querés eliminar a ${nombre} del equipo?\nSus visitas asignadas quedarán sin encargado.`)) return;
+  try {
+    await deleteDoc(doc(db, 'encargados', id));
+    showToast(`${nombre} eliminado del equipo`);
+  } catch(e) {
+    showToast('Error al eliminar. Revisá la conexión.');
+    console.error(e);
+  }
+};
 
 // ─── ASIGNACIÓN AUTOMÁTICA ───────────────────────────────────────────────────
 function asignarEncargado(genero, edad) {
   const cat = catDeVisita(genero, edad);
   const candidatos = encargadosCache.filter(e => e.cat === cat && e.rol !== 'admin');
   if (!candidatos.length) return null;
-
-  const conConteo = candidatos.map(e => ({
-    ...e,
-    count: visitasCache.filter(v => v.encargadoId === e.id).length
-  }));
+  const conConteo = candidatos.map(e => ({ ...e, count: visitasCache.filter(v => v.encargadoId === e.id).length }));
   conConteo.sort((a, b) => a.count - b.count);
   return conConteo[0];
 }
 
-// Vista previa de asignación al cambiar género/edad
 function actualizarPreview() {
   const genero = document.getElementById('f-genero').value;
   const edad = document.getElementById('f-edad').value;
@@ -326,42 +336,27 @@ window.guardarVisita = async function() {
   if (!nombre || !edad || !genero || !tel || !fecha) { showToast('Completá todos los campos obligatorios'); return; }
 
   const enc = asignarEncargado(genero, edad);
-
   const visita = {
     nombre, edad: parseInt(edad), genero, tel, fecha, notas,
     encargadoId: enc ? enc.id : null,
     encargadoNombre: enc ? enc.nombre : null,
-    historial: [],
-    creadoPor: currentUser.id,
-    creadoEn: serverTimestamp()
+    historial: [], creadoPor: currentUser.id, creadoEn: serverTimestamp()
   };
 
   try {
     const docRef = await addDoc(collection(db, 'visitas'), visita);
-
-    // Crear notificación para el encargado
     if (enc) {
       await addDoc(collection(db, 'notificaciones'), {
-        paraId: enc.id,
-        paraNombre: enc.nombre,
-        tipo: 'nueva-asignacion',
-        visitaId: docRef.id,
-        visitaNombre: nombre,
-        visitaTel: tel,
-        visitaEdad: parseInt(edad),
-        visitaGenero: genero,
-        visitaFecha: fecha,
-        leida: false,
-        creadoEn: serverTimestamp()
+        paraId: enc.id, paraNombre: enc.nombre, tipo: 'nueva-asignacion',
+        visitaId: docRef.id, visitaNombre: nombre, visitaTel: tel,
+        visitaEdad: parseInt(edad), visitaGenero: genero, visitaFecha: fecha,
+        leida: false, creadoEn: serverTimestamp()
       });
     }
-
-    // Limpiar form
     ['f-nombre','f-edad','f-tel','f-notas'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('f-genero').value = '';
     document.getElementById('f-fecha').value = new Date().toISOString().split('T')[0];
     document.getElementById('asignacion-preview').style.display = 'none';
-
     showToast(enc ? `Registrado y asignado a ${enc.nombre}` : 'Registrado sin encargado disponible');
     showPage('inicio');
   } catch(e) {
@@ -411,29 +406,18 @@ window.abrirModal = async function(id) {
       </div>`).join('')
     : `<div style="font-size:13px;color:var(--text3);padding:8px 0">Sin contactos registrados aún</div>`;
 
-  // Botón eliminar — solo visible para admin
   const btnEliminar = currentUser.rol === 'admin' ? `
     <button onclick="eliminarVisita('${v.id}')" style="
-      width:100%;
-      margin-top:12px;
-      padding:11px 16px;
-      background:transparent;
-      color:#e05555;
-      border:1.5px solid #e05555;
-      border-radius:10px;
-      font-size:14px;
-      font-weight:500;
-      cursor:pointer;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      gap:7px;
+      width:100%; margin-top:12px; padding:11px 16px;
+      background:transparent; color:#e05555;
+      border:1.5px solid #e05555; border-radius:10px;
+      font-size:14px; font-weight:500; cursor:pointer;
+      display:flex; align-items:center; justify-content:center; gap:7px;
     ">
       <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <polyline points="3 6 5 6 21 6"/>
         <path d="M19 6l-1 14H6L5 6"/>
-        <path d="M10 11v6"/>
-        <path d="M14 11v6"/>
+        <path d="M10 11v6"/><path d="M14 11v6"/>
         <path d="M9 6V4h6v2"/>
       </svg>
       Eliminar visita
@@ -464,7 +448,6 @@ window.abrirModal = async function(id) {
       </a>
     </div>
     ${btnEliminar}
-
     <div class="seguimiento-section">
       <div class="seguimiento-title">Historial de contactos</div>
       ${histHTML}
@@ -546,22 +529,18 @@ function renderNotificaciones() {
     el.innerHTML = '<div class="empty-state">Sin notificaciones</div>';
     return;
   }
-
   el.innerHTML = [...notifsCache].reverse().map(n => {
     const telLimpio = limpiarTel(n.visitaTel || '');
     const msg = encodeURIComponent(
       `Hola ${n.visitaNombre}! Te saluda ${currentUser.nombre} de la iglesia. ` +
       `Fue un gusto tenerte el ${formatFecha(n.visitaFecha)}. ¿Cómo estás? Queremos mantenernos en contacto contigo. ¡Bendiciones!`
     );
-
     return `<div class="notif-item ${n.leida ? '' : 'notif-new'}" onclick="marcarNotifLeida('${n.id}')">
       <div class="notif-head">
         <span class="notif-titulo">Nueva asignación: ${n.visitaNombre}</span>
         <span class="notif-fecha">${n.visitaFecha ? formatFecha(n.visitaFecha) : ''}</span>
       </div>
-      <div class="notif-body">
-        ${n.visitaGenero === 'F' ? 'Mujer' : 'Varón'}, ${n.visitaEdad} años · ${n.visitaTel || ''}
-      </div>
+      <div class="notif-body">${n.visitaGenero === 'F' ? 'Mujer' : 'Varón'}, ${n.visitaEdad} años · ${n.visitaTel || ''}</div>
       <button class="notif-wa-btn" onclick="event.stopPropagation();window.open('https://wa.me/54${telLimpio}?text=${msg}','_blank')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
         Enviar WhatsApp de bienvenida
@@ -579,13 +558,10 @@ window.marcarNotifLeida = async function(id) {
 window.showPage = function(p) {
   document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
   document.querySelectorAll('.nav-btn').forEach(x => x.classList.remove('active'));
-
   const pageEl = document.getElementById('page-' + p);
   if (pageEl) pageEl.classList.add('active');
-
   const navBtn = document.querySelector(`[data-page="${p}"]`);
   if (navBtn) navBtn.classList.add('active');
-
   if (p === 'inicio') renderInicio();
   if (p === 'mis-asignados') renderMisAsignados();
   if (p === 'todas') renderTodas();
