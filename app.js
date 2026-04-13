@@ -311,8 +311,8 @@ function actualizarPreview() {
   }
 }
 
-document.getElementById('f-genero').addEventListener('change', actualizarPreview);
-document.getElementById('f-edad').addEventListener('input', actualizarPreview);
+document.getElementById('f-genero')?.addEventListener('change', actualizarPreview);
+document.getElementById('f-edad')?.addEventListener('input', actualizarPreview););
 
 // ─── GUARDAR VISITA ──────────────────────────────────────────────────────────
 window.guardarVisita = async function() {
