@@ -36,7 +36,6 @@ window.doLogin = async function() {
   if (!usuario || !pass) { showError('Completá usuario y contraseña'); return; }
 
   try {
-    // Admin por defecto — cambiá 'admin123' por tu contraseña segura
     if (usuario === 'admin' && pass === 'admin123') {
       currentUser = { id: 'admin', nombre: 'Administrador', rol: 'admin', usuario: 'admin' };
       sessionStorage.setItem('cv_user', JSON.stringify(currentUser));
@@ -179,6 +178,15 @@ function limpiarTel(tel) {
   return (tel || '').replace(/\D/g, '');
 }
 
+// ─── MENSAJE WA PARA CONTACTAR A LA VISITA ───────────────────────────────────
+function msgVisita(nombreVisita, nombreEncargado) {
+  return encodeURIComponent(
+    `Hola ${nombreVisita}, ¿cómo estás? ¡Dios te bendiga!\n` +
+    `Mi nombre es ${nombreEncargado}, te escribo de Siquem Iglesia, ` +
+    `de parte de los Pastores Omar y Patricia Bou Sleiman.`
+  );
+}
+
 // ─── RENDER INICIO ───────────────────────────────────────────────────────────
 function renderInicio() {
   const v = currentUser.rol === 'admin' ? visitasCache : visitasCache.filter(x => x.encargadoId === currentUser.id);
@@ -284,7 +292,7 @@ function renderEncargados() {
   }).join('');
 }
 
-// ─── ELIMINAR ENCARGADO (solo admin) ─────────────────────────────────────────
+// ─── ELIMINAR ENCARGADO ───────────────────────────────────────────────────────
 window.eliminarEncargado = async function(id, nombre) {
   if (!confirm(`¿Seguro que querés eliminar a ${nombre} del equipo?\nSus visitas asignadas quedarán sin encargado.`)) return;
   try {
@@ -345,18 +353,38 @@ window.guardarVisita = async function() {
 
   try {
     const docRef = await addDoc(collection(db, 'visitas'), visita);
+
     if (enc) {
+      // Campanita en la app
       await addDoc(collection(db, 'notificaciones'), {
         paraId: enc.id, paraNombre: enc.nombre, tipo: 'nueva-asignacion',
         visitaId: docRef.id, visitaNombre: nombre, visitaTel: tel,
         visitaEdad: parseInt(edad), visitaGenero: genero, visitaFecha: fecha,
         leida: false, creadoEn: serverTimestamp()
       });
+
+      // WhatsApp automático al encargado
+      if (enc.tel) {
+        const telEnc = limpiarTel(enc.tel);
+        const msgEnc = encodeURIComponent(
+          `Hola ${enc.nombre}! Te fue asignada una nueva alma para contactarte.\n` +
+          `Nombre: ${nombre}\n` +
+          `Tel: ${tel}\n` +
+          `Fecha de Ingreso: ${formatFecha(fecha)}\n` +
+          `Podés contactarla/o desde la app.`
+        );
+        setTimeout(() => {
+          window.open(`https://wa.me/54${telEnc}?text=${msgEnc}`, '_blank');
+        }, 800);
+      }
     }
+
+    // Limpiar form
     ['f-nombre','f-edad','f-tel','f-notas'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('f-genero').value = '';
     document.getElementById('f-fecha').value = new Date().toISOString().split('T')[0];
     document.getElementById('asignacion-preview').style.display = 'none';
+
     showToast(enc ? `Registrado y asignado a ${enc.nombre}` : 'Registrado sin encargado disponible');
     showPage('inicio');
   } catch(e) {
@@ -394,6 +422,7 @@ window.abrirModal = async function(id) {
   const enc = encargadosCache.find(e => e.id === v.encargadoId);
   const dias = diasSinContacto(v);
   const telLimpio = limpiarTel(v.tel);
+  const waMsg = msgVisita(v.nombre, currentUser.nombre);
 
   const histHTML = (v.historial || []).length
     ? [...v.historial].reverse().map(h => `
@@ -412,8 +441,7 @@ window.abrirModal = async function(id) {
       background:transparent; color:#e05555;
       border:1.5px solid #e05555; border-radius:10px;
       font-size:14px; font-weight:500; cursor:pointer;
-      display:flex; align-items:center; justify-content:center; gap:7px;
-    ">
+      display:flex; align-items:center; justify-content:center; gap:7px;">
       <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <polyline points="3 6 5 6 21 6"/>
         <path d="M19 6l-1 14H6L5 6"/>
@@ -438,7 +466,7 @@ window.abrirModal = async function(id) {
       ${v.notas ? `<div class="info-row"><span class="info-label">Notas</span><span class="info-val">${v.notas}</span></div>` : ''}
     </div>
     <div class="modal-actions">
-      <button class="btn-whatsapp" onclick="window.open('https://wa.me/54${telLimpio}?text=${encodeURIComponent(`Hola ${v.nombre}, ¿cómo estás? ¡Dios te bendiga!\nMi nombre es ${currentUser.nombre}, te escribo de Siquem Iglesia, de parte de los Pastores Omar y Patricia Bou Sleiman.`)}','_blank')"
+      <button class="btn-whatsapp" onclick="window.open('https://wa.me/54${telLimpio}?text=${waMsg}','_blank')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
         WhatsApp
       </button>
@@ -487,7 +515,7 @@ window.cerrarModal = function(e) {
     document.getElementById('modal-bg').classList.remove('open');
 };
 
-// ─── ELIMINAR VISITA (solo admin) ────────────────────────────────────────────
+// ─── ELIMINAR VISITA ─────────────────────────────────────────────────────────
 window.eliminarVisita = async function(id) {
   if (!confirm('¿Seguro que querés eliminar esta visita?\nEsta acción no se puede deshacer.')) return;
   try {
@@ -530,24 +558,27 @@ function renderNotificaciones() {
     return;
   }
   el.innerHTML = [...notifsCache].reverse().map(n => {
-    const telLimpio = limpiarTel(n.visitaTel || '');
-    const msg = encodeURIComponent(
-      `Hola ${n.visitaNombre}! Te saluda ${currentUser.nombre} de la iglesia. ` +
-      `Fue un gusto tenerte el ${formatFecha(n.visitaFecha)}. ¿Cómo estás? Queremos mantenernos en contacto contigo. ¡Bendiciones!`
-    );
-    return `<div class="notif-item ${n.leida ? '' : 'notif-new'}" onclick="marcarNotifLeida('${n.id}')">
+    return `<div class="notif-item ${n.leida ? '' : 'notif-new'}" onclick="abrirDesdeNotif('${n.id}','${n.visitaId}')">
       <div class="notif-head">
-        <span class="notif-titulo">Nueva asignación: ${n.visitaNombre}</span>
+        <span class="notif-titulo">🔔 Nueva asignación: ${n.visitaNombre}</span>
         <span class="notif-fecha">${n.visitaFecha ? formatFecha(n.visitaFecha) : ''}</span>
       </div>
-      <div class="notif-body">${n.visitaGenero === 'F' ? 'Mujer' : 'Varón'}, ${n.visitaEdad} años · ${n.visitaTel || ''}</div>
-      <button class="notif-wa-btn" onclick="event.stopPropagation();window.open('https://wa.me/54${telLimpio}?text=${msg}','_blank')">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-        Enviar WhatsApp de bienvenida
-      </button>
+      <div class="notif-body">
+        ${n.visitaGenero === 'F' ? 'Mujer' : 'Varón'}, ${n.visitaEdad} años · ${n.visitaTel || ''}
+      </div>
+      <div style="font-size:12px;color:var(--accent2);margin-top:8px;">
+        Tocá para ver el perfil y contactar →
+      </div>
     </div>`;
   }).join('');
 }
+
+// ─── ABRIR MODAL DESDE NOTIFICACIÓN ──────────────────────────────────────────
+window.abrirDesdeNotif = async function(notifId, visitaId) {
+  try { await updateDoc(doc(db, 'notificaciones', notifId), { leida: true }); } catch(e) {}
+  showPage('mis-asignados');
+  setTimeout(() => abrirModal(visitaId), 150);
+};
 
 window.marcarNotifLeida = async function(id) {
   try { await updateDoc(doc(db, 'notificaciones', id), { leida: true }); }
@@ -566,10 +597,7 @@ window.showPage = function(p) {
   if (p === 'mis-asignados') renderMisAsignados();
   if (p === 'todas') renderTodas();
   if (p === 'encargados') renderEncargados();
-  if (p === 'notificaciones') {
-    renderNotificaciones();
-    notifsCache.filter(n => !n.leida).forEach(n => marcarNotifLeida(n.id));
-  }
+  if (p === 'notificaciones') renderNotificaciones();
 };
 
 // ─── TOAST ───────────────────────────────────────────────────────────────────
