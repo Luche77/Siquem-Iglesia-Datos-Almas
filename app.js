@@ -292,12 +292,82 @@ function renderEncargados() {
   }).join('');
 }
 
-// ─── ELIMINAR ENCARGADO ───────────────────────────────────────────────────────
+// ─── ELIMINAR ENCARGADO CON REASIGNACIÓN ─────────────────────────────────────
 window.eliminarEncargado = async function(id, nombre) {
-  if (!confirm(`¿Seguro que querés eliminar a ${nombre} del equipo?\nSus visitas asignadas quedarán sin encargado.`)) return;
+  if (!confirm(`¿Seguro que querés eliminar a ${nombre} del equipo?\nSus visitas se reasignarán automáticamente.`)) return;
+
   try {
+    // 1. Buscar todas las visitas asignadas a este encargado
+    const visitasDelEnc = visitasCache.filter(v => v.encargadoId === id);
+
+    // 2. Obtener la categoría del encargado que se va
+    const encQueSeVa = encargadosCache.find(e => e.id === id);
+    const cat = encQueSeVa?.cat;
+
+    // 3. Candidatos del mismo grupo (excluir al que se va y admins)
+    const candidatos = encargadosCache.filter(e => e.id !== id && e.cat === cat && e.rol !== 'admin');
+
+    // 4. Reasignar cada visita al candidato con menos carga
+    const notifsPorEnc = {}; // acumular visitas por encargado nuevo para notif agrupada
+
+    for (const visita of visitasDelEnc) {
+      // Recalcular conteo actualizado en cada iteración
+      const conConteo = candidatos.map(e => ({
+        ...e,
+        count: visitasCache.filter(v => v.encargadoId === e.id).length
+      }));
+      conConteo.sort((a, b) => a.count - b.count);
+      const nuevoEnc = conConteo[0];
+
+      if (nuevoEnc) {
+        // Actualizar visita en Firestore
+        await updateDoc(doc(db, 'visitas', visita.id), {
+          encargadoId: nuevoEnc.id,
+          encargadoNombre: nuevoEnc.nombre
+        });
+        // Actualizar cache local para que el conteo se recalcule bien
+        visita.encargadoId = nuevoEnc.id;
+        visita.encargadoNombre = nuevoEnc.nombre;
+
+        // Acumular para notificación agrupada
+        if (!notifsPorEnc[nuevoEnc.id]) {
+          notifsPorEnc[nuevoEnc.id] = { enc: nuevoEnc, visitas: [] };
+        }
+        notifsPorEnc[nuevoEnc.id].visitas.push(visita);
+      }
+    }
+
+    // 5. Crear una notificación por encargado que recibió reasignaciones
+    for (const entry of Object.values(notifsPorEnc)) {
+      const { enc: nuevoEnc, visitas: reasignadas } = entry;
+      const nombresVisitas = reasignadas.map(v => v.nombre).join(', ');
+      await addDoc(collection(db, 'notificaciones'), {
+        paraId: nuevoEnc.id,
+        paraNombre: nuevoEnc.nombre,
+        tipo: 'reasignacion',
+        visitaId: reasignadas[0].id, // para poder abrir la primera al tocar
+        visitaNombre: reasignadas.length === 1
+          ? reasignadas[0].nombre
+          : `${reasignadas.length} personas (${nombresVisitas})`,
+        visitaTel: reasignadas[0].tel,
+        visitaEdad: reasignadas[0].edad,
+        visitaGenero: reasignadas[0].genero,
+        visitaFecha: reasignadas[0].fecha,
+        leida: false,
+        creadoEn: serverTimestamp(),
+        esReasignacion: true,
+        encargadoAnterior: nombre
+      });
+    }
+
+    // 6. Eliminar el encargado
     await deleteDoc(doc(db, 'encargados', id));
-    showToast(`${nombre} eliminado del equipo`);
+
+    const totalReasignadas = visitasDelEnc.length;
+    showToast(totalReasignadas > 0
+      ? `${nombre} eliminado. ${totalReasignadas} visita${totalReasignadas > 1 ? 's' : ''} reasignada${totalReasignadas > 1 ? 's' : ''}.`
+      : `${nombre} eliminado del equipo.`
+    );
   } catch(e) {
     showToast('Error al eliminar. Revisá la conexión.');
     console.error(e);
@@ -558,16 +628,23 @@ function renderNotificaciones() {
     return;
   }
   el.innerHTML = [...notifsCache].reverse().map(n => {
+    const esReasig = n.esReasignacion;
+    const icono = esReasig ? '🔄' : '🔔';
+    const titulo = esReasig
+      ? `Reasignación de ${n.encargadoAnterior}: ${n.visitaNombre}`
+      : `Nueva asignación: ${n.visitaNombre}`;
+    const subtitulo = esReasig
+      ? `Estas personas fueron reasignadas a vos`
+      : `${n.visitaGenero === 'F' ? 'Mujer' : 'Varón'}, ${n.visitaEdad} años · ${n.visitaTel || ''}`;
+
     return `<div class="notif-item ${n.leida ? '' : 'notif-new'}" onclick="abrirDesdeNotif('${n.id}','${n.visitaId}')">
       <div class="notif-head">
-        <span class="notif-titulo">🔔 Nueva asignación: ${n.visitaNombre}</span>
+        <span class="notif-titulo">${icono} ${titulo}</span>
         <span class="notif-fecha">${n.visitaFecha ? formatFecha(n.visitaFecha) : ''}</span>
       </div>
-      <div class="notif-body">
-        ${n.visitaGenero === 'F' ? 'Mujer' : 'Varón'}, ${n.visitaEdad} años · ${n.visitaTel || ''}
-      </div>
+      <div class="notif-body">${subtitulo}</div>
       <div style="font-size:12px;color:var(--accent2);margin-top:8px;">
-        Tocá para ver el perfil y contactar →
+        Tocá para ver el perfil →
       </div>
     </div>`;
   }).join('');
