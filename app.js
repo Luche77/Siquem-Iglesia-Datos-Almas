@@ -14,6 +14,14 @@ let filtroMios = 'todos'
 let filtroTodas = 'todas'
 let modalId = null
 
+// ─── XSS ────────────────────────────────────────────────────────────────────
+function esc(str) {
+  if (!str) return ''
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')
+}
+
 // ─── LOGIN ───────────────────────────────────────────────────────────────────
 window.doLogin = async function () {
   const usuario = document.getElementById('login-user').value.trim().toLowerCase()
@@ -27,14 +35,6 @@ window.doLogin = async function () {
   btn.textContent = 'Ingresando...'
 
   try {
-    // Admin por defecto hardcodeado
-    if (usuario === 'admin' && pass === 'admin123') {
-      currentUser = { id: 'admin-local', nombre: 'Administrador', rol: 'admin', usuario: 'admin' }
-      sessionStorage.setItem('siquem_user', JSON.stringify(currentUser))
-      await iniciarApp()
-      return
-    }
-
     const { data, error } = await sb
       .from('encargados')
       .select('*')
@@ -179,39 +179,55 @@ function catDeVisita(genero, edad) {
 
 function limTel(t) { return (t||'').replace(/\D/g,'') }
 
+function esCerrada(v) {
+  return v.estado === 'integrado' || v.estado === 'no-continuo'
+}
+
 function asignarEncargado(genero, edad) {
   const cat = catDeVisita(genero, edad)
   const cands = encargados.filter(e => e.cat === cat && e.rol !== 'admin')
   if (!cands.length) return null
-  const conCnt = cands.map(e => ({ ...e, cnt: visitas.filter(v => v.encargado_id === e.id).length }))
+  const conCnt = cands.map(e => ({ ...e, cnt: visitas.filter(v => v.encargado_id === e.id && !esCerrada(v)).length }))
   conCnt.sort((a,b) => a.cnt - b.cnt)
   return conCnt[0]
 }
 
+function getBusqueda(id) {
+  return (document.getElementById(id)?.value || '').toLowerCase().trim()
+}
+
 // ─── CARD VISITA ─────────────────────────────────────────────────────────────
 function vCard(v) {
+  const cerrada = esCerrada(v)
   const dias = diasSinContacto(v)
   const enc = encargados.find(e => e.id === v.encargado_id)
-  return `<div class="v-card" onclick="abrirModal('${v.id}')">
+
+  let badge = ''
+  if (v.estado === 'integrado') badge = `<span class="d-badge d-integrado">Integrado</span>`
+  else if (v.estado === 'no-continuo') badge = `<span class="d-badge d-nc">No continuó</span>`
+  else badge = dBadge(dias)
+
+  return `<div class="v-card${cerrada?' v-card-closed':''}" onclick="abrirModal('${v.id}')">
     <div class="v-av ${v.genero==='F'?'av-f':'av-m'}">${initials(v.nombre)}</div>
     <div class="v-body">
-      <div class="v-nombre">${v.nombre}</div>
+      <div class="v-nombre">${esc(v.nombre)}</div>
       <div class="v-meta">${v.genero==='F'?'Mujer':'Varón'}, ${v.edad} años · ${fmt(v.fecha)}</div>
-      ${enc?`<div class="v-enc">${enc.nombre}</div>`:''}
+      ${enc?`<div class="v-enc">${esc(enc.nombre)}</div>`:''}
     </div>
-    <div class="v-right">${dBadge(dias)}<div class="d-label">${v.historial?.length?'últ. contacto':'desde visita'}</div></div>
+    <div class="v-right">${badge}${!cerrada?`<div class="d-label">${v.historial?.length?'últ. contacto':'desde visita'}</div>`:''}</div>
   </div>`
 }
 
 // ─── RENDER INICIO ───────────────────────────────────────────────────────────
 function renderInicio() {
   const base = currentUser.rol==='admin' ? visitas : visitas.filter(v=>v.encargado_id===currentUser.id)
-  const urg = base.filter(v=>diasSinContacto(v)>=14)
-  const prox = base.filter(v=>{const d=diasSinContacto(v);return d>=7&&d<14})
-  const ok = base.filter(v=>diasSinContacto(v)<7)
+  const activas = base.filter(v=>!esCerrada(v))
+  const urg = activas.filter(v=>diasSinContacto(v)>=14)
+  const prox = activas.filter(v=>{const d=diasSinContacto(v);return d>=7&&d<14})
+  const ok = activas.filter(v=>diasSinContacto(v)<7)
 
   document.getElementById('stats-grid').innerHTML = `
-    <div class="stat-card"><div class="stat-n">${base.length}</div><div class="stat-l">Total</div></div>
+    <div class="stat-card"><div class="stat-n">${activas.length}</div><div class="stat-l">Activas</div></div>
     <div class="stat-card"><div class="stat-n" style="color:var(--danger)">${urg.length}</div><div class="stat-l">Urgentes</div></div>
     <div class="stat-card"><div class="stat-n" style="color:var(--ok)">${ok.length}</div><div class="stat-l">Al día</div></div>`
 
@@ -223,10 +239,19 @@ function renderInicio() {
 
 // ─── MIS ASIGNADOS ───────────────────────────────────────────────────────────
 function renderMisAsignados() {
+  const term = getBusqueda('search-mios')
   let v = visitas.filter(x=>x.encargado_id===currentUser.id)
-  if (filtroMios==='urgente') v=v.filter(x=>diasSinContacto(x)>=14)
-  if (filtroMios==='ok') v=v.filter(x=>diasSinContacto(x)<14)
-  document.getElementById('list-mios').innerHTML = v.length ? v.map(vCard).join('') : '<div class="empty">No tenés asignados aún</div>'
+
+  if (filtroMios === 'integrados') {
+    v = v.filter(x => esCerrada(x))
+  } else {
+    v = v.filter(x => !esCerrada(x))
+    if (filtroMios==='urgente') v=v.filter(x=>diasSinContacto(x)>=14)
+    if (filtroMios==='ok') v=v.filter(x=>diasSinContacto(x)<14)
+  }
+
+  if (term) v = v.filter(x => x.nombre.toLowerCase().includes(term))
+  document.getElementById('list-mios').innerHTML = v.length ? v.map(vCard).join('') : '<div class="empty">No hay resultados</div>'
 }
 
 window.setFiltroMios = function(f, btn) {
@@ -235,11 +260,22 @@ window.setFiltroMios = function(f, btn) {
   btn.classList.add('active'); renderMisAsignados()
 }
 
+window.onSearchMios = function() { renderMisAsignados() }
+
 // ─── TODAS ───────────────────────────────────────────────────────────────────
 function renderTodas() {
+  const term = getBusqueda('search-todas')
   let v = [...visitas]
-  if (filtroTodas==='urgentes') v=v.filter(x=>diasSinContacto(x)>=14)
-  if (filtroTodas==='sin-asignar') v=v.filter(x=>!x.encargado_id)
+
+  if (filtroTodas === 'integrados') {
+    v = v.filter(x => esCerrada(x))
+  } else {
+    v = v.filter(x => !esCerrada(x))
+    if (filtroTodas==='urgentes') v=v.filter(x=>diasSinContacto(x)>=14)
+    if (filtroTodas==='sin-asignar') v=v.filter(x=>!x.encargado_id)
+  }
+
+  if (term) v = v.filter(x => x.nombre.toLowerCase().includes(term))
   document.getElementById('list-todas').innerHTML = v.length ? v.map(vCard).join('') : '<div class="empty">Sin visitas aún</div>'
 }
 
@@ -249,23 +285,25 @@ window.setFiltroTodas = function(f, btn) {
   btn.classList.add('active'); renderTodas()
 }
 
+window.onSearchTodas = function() { renderTodas() }
+
 // ─── EQUIPO ──────────────────────────────────────────────────────────────────
 function renderEquipo() {
   const el = document.getElementById('list-equipo')
   if (!encargados.length) { el.innerHTML = '<div class="empty">Sin encargados aún</div>'; return }
   el.innerHTML = encargados.map(e => {
-    const total = visitas.filter(v=>v.encargado_id===e.id).length
+    const total = visitas.filter(v=>v.encargado_id===e.id && !esCerrada(v)).length
     return `<div class="enc-card">
       <div class="v-av ${e.cat?.startsWith('mujer')?'av-f':'av-m'}">${initials(e.nombre)}</div>
       <div class="enc-info">
-        <div class="enc-nombre">${e.nombre}</div>
-        <div class="enc-meta">@${e.usuario} · ${e.tel||'-'}</div>
+        <div class="enc-nombre">${esc(e.nombre)}</div>
+        <div class="enc-meta">@${esc(e.usuario)} · ${esc(e.tel)||'-'}</div>
         <div class="enc-badges">
           <span class="badge ${e.rol==='admin'?'b-admin':'b-enc'}">${e.rol==='admin'?'Admin':'Encargado'}</span>
           <span class="badge ${catClass(e.cat)}">${catLabel(e.cat)}</span>
         </div>
       </div>
-      <div class="enc-cnt"><div class="enc-cnt-n">${total}</div><div class="enc-cnt-l">asignadas</div></div>
+      <div class="enc-cnt"><div class="enc-cnt-n">${total}</div><div class="enc-cnt-l">activas</div></div>
     </div>`
   }).join('')
 }
@@ -281,12 +319,11 @@ window.guardarVisita = async function () {
   if (!nombre||!edad||!genero||!tel||!fecha) { toast('Completá todos los campos obligatorios'); return }
 
   const enc = asignarEncargado(genero, edad)
-  const payload = { nombre, edad:parseInt(edad), genero, tel, fecha, notas, historial:[], encargado_id: enc?.id||null, encargado_nombre: enc?.nombre||null, creado_por: currentUser.id }
+  const payload = { nombre, edad:parseInt(edad), genero, tel, fecha, notas, historial:[], encargado_id: enc?.id||null, encargado_nombre: enc?.nombre||null, creado_por: currentUser.id, estado: 'activa' }
 
   const { data, error } = await sb.from('visitas').insert(payload).select().single()
   if (error) { toast('Error al guardar: '+error.message); console.error(error); return }
 
-  // Notificación para el encargado
   if (enc) {
     await sb.from('notificaciones').insert({
       para_id: enc.id, para_nombre: enc.nombre, tipo: 'nueva-asignacion',
@@ -327,7 +364,9 @@ function actualizarPreview() {
   if (genero && edad) {
     const enc = asignarEncargado(genero, edad)
     preview.style.display = 'block'
-    preview.innerHTML = enc ? `✦ Se asignará a <strong>${enc.nombre}</strong> (${catLabel(enc.cat)})` : `⚠ Sin encargados disponibles para esta categoría`
+    preview.innerHTML = enc
+      ? `✦ Se asignará a <strong>${esc(enc.nombre)}</strong> (${catLabel(enc.cat)})`
+      : `⚠ Sin encargados disponibles para esta categoría`
   } else preview.style.display = 'none'
 }
 document.getElementById('f-genero').addEventListener('change', actualizarPreview)
@@ -341,44 +380,82 @@ window.abrirModal = function (id) {
   const enc = encargados.find(e=>e.id===v.encargado_id)
   const dias = diasSinContacto(v)
   const tel = limTel(v.tel)
+  const cerrada = esCerrada(v)
+  const isAdmin = currentUser.rol === 'admin'
 
   const histHTML = v.historial?.length
     ? [...v.historial].reverse().map(h=>`
         <div class="hist-item">
           <div class="hist-head"><span class="hist-fecha">${fmt(h.fecha)}</span><span class="hist-medio m-${h.medio}">${h.medio}</span></div>
-          ${h.obs?`<div class="hist-obs">${h.obs}</div>`:''}
-          <div class="hist-by">Registrado por ${h.por||'—'}</div>
+          ${h.obs?`<div class="hist-obs">${esc(h.obs)}</div>`:''}
+          <div class="hist-by">Registrado por ${esc(h.por||'—')}</div>
         </div>`).join('')
     : `<div style="font-size:13px;color:var(--text3);padding:6px 0">Sin contactos registrados aún</div>`
+
+  const estadoHTML = !cerrada
+    ? `<div class="modal-estado-btns">
+        <button class="btn-estado btn-integrado" onclick="cambiarEstado('integrado')">✓ Integrado</button>
+        <button class="btn-estado btn-nc" onclick="cambiarEstado('no-continuo')">✕ No continuó</button>
+       </div>`
+    : `<div class="modal-estado-btns">
+        <div class="estado-tag ${v.estado==='integrado'?'et-integrado':'et-nc'}">${v.estado==='integrado'?'✓ Integrado':'✕ No continuó'}</div>
+        <button class="btn-estado btn-reactivar" onclick="cambiarEstado('activa')">↩ Reactivar</button>
+       </div>`
+
+  const reasignarHTML = isAdmin ? `
+    <div class="modal-section">
+      <div class="modal-section-title">Reasignar encargado</div>
+      <div class="seg-row" style="align-items:flex-end">
+        <div class="field" style="margin-bottom:0">
+          <select id="sel-encargado">
+            <option value="">Sin asignar</option>
+            ${encargados.filter(e=>e.rol!=='admin').map(e=>`<option value="${e.id}"${e.id===v.encargado_id?' selected':''}>${esc(e.nombre)}</option>`).join('')}
+          </select>
+        </div>
+        <button class="btn-primary" style="margin-top:0;width:auto;padding:11px 18px" onclick="reasignarEncargado()">Guardar</button>
+      </div>
+    </div>` : ''
+
+  const editHTML = `
+    <div class="modal-section">
+      <div class="modal-section-title">Editar datos</div>
+      <div class="field" style="margin-bottom:10px"><label>Nombre</label><input id="edit-nombre" type="text" value="${esc(v.nombre)}"></div>
+      <div class="field" style="margin-bottom:10px"><label>Teléfono</label><input id="edit-tel" type="tel" value="${esc(v.tel)}"></div>
+      <div class="field" style="margin-bottom:10px"><label>Notas</label><textarea id="edit-notas" rows="2">${esc(v.notas||'')}</textarea></div>
+      <button class="btn-primary" style="margin-top:0" onclick="guardarEdicion()">Guardar cambios</button>
+    </div>`
 
   document.getElementById('modal-content').innerHTML = `
     <div class="modal-inner">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
         <div class="v-av ${v.genero==='F'?'av-f':'av-m'}" style="width:50px;height:50px;font-size:15px;flex-shrink:0">${initials(v.nombre)}</div>
         <div>
-          <div class="modal-nombre">${v.nombre}</div>
-          <div class="modal-sub">${v.genero==='F'?'Mujer':'Varón'}, ${v.edad} años · ${dBadge(dias)}</div>
+          <div class="modal-nombre">${esc(v.nombre)}</div>
+          <div class="modal-sub">${v.genero==='F'?'Mujer':'Varón'}, ${v.edad} años · ${cerrada?(v.estado==='integrado'?'<span style="color:var(--ok)">Integrado</span>':'<span style="color:var(--text3)">No continuó</span>'):dBadge(dias)}</div>
         </div>
       </div>
-      <div class="info-row"><span class="info-lbl">Teléfono</span><span class="info-val"><a href="tel:${v.tel}">${v.tel}</a></span></div>
+      <div class="info-row"><span class="info-lbl">Teléfono</span><span class="info-val"><a href="tel:${esc(v.tel)}">${esc(v.tel)}</a></span></div>
       <div class="info-row"><span class="info-lbl">Visita</span><span class="info-val">${fmt(v.fecha)}</span></div>
-      <div class="info-row"><span class="info-lbl">Encargado</span><span class="info-val">${enc?enc.nombre:'Sin asignar'}</span></div>
-      ${v.notas?`<div class="info-row"><span class="info-lbl">Notas</span><span class="info-val">${v.notas}</span></div>`:''}
+      <div class="info-row"><span class="info-lbl">Encargado</span><span class="info-val">${enc?esc(enc.nombre):'Sin asignar'}</span></div>
+      ${v.notas?`<div class="info-row"><span class="info-lbl">Notas</span><span class="info-val">${esc(v.notas)}</span></div>`:''}
     </div>
+    ${estadoHTML}
     <div class="modal-btns">
       <button class="btn-wa" onclick="window.open('https://wa.me/54${tel}','_blank')">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
         WhatsApp
       </button>
-      <a href="tel:${v.tel}" class="btn-primary" style="text-decoration:none;flex:1;margin-top:0">
+      <a href="tel:${esc(v.tel)}" class="btn-primary" style="text-decoration:none;flex:1;margin-top:0">
         <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.4 2 2 0 0 1 3.6 1.21h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.84a16 16 0 0 0 6 6l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.73 16.92z"/></svg>
         Llamar
       </a>
     </div>
+    ${reasignarHTML}
+    ${editHTML}
     <div class="seg-section">
       <div class="seg-title">Historial de contactos</div>
       ${histHTML}
-      <div class="nuevo-seg">
+      ${!cerrada ? `<div class="nuevo-seg">
         <div class="nuevo-seg-title">Registrar nuevo contacto</div>
         <div class="seg-row">
           <div class="field" style="margin-bottom:0"><label>Fecha</label><input id="seg-fecha" type="date" value="${new Date().toISOString().split('T')[0]}"></div>
@@ -398,7 +475,7 @@ window.abrirModal = function (id) {
           <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
           Guardar contacto
         </button>
-      </div>
+      </div>` : ''}
     </div>`
 
   document.getElementById('modal-bg').classList.add('open')
@@ -407,6 +484,40 @@ window.abrirModal = function (id) {
 window.cerrarModal = function (e) {
   if (!e || e.target===document.getElementById('modal-bg'))
     document.getElementById('modal-bg').classList.remove('open')
+}
+
+// ─── CAMBIAR ESTADO ──────────────────────────────────────────────────────────
+window.cambiarEstado = async function (estado) {
+  if (!modalId) return
+  const { error } = await sb.from('visitas').update({ estado }).eq('id', modalId)
+  if (error) { toast('Error al actualizar'); console.error(error); return }
+  document.getElementById('modal-bg').classList.remove('open')
+  const labels = { integrado: 'Marcado como integrado ✓', 'no-continuo': 'Marcado como no continuó', activa: 'Visita reactivada' }
+  toast(labels[estado] || 'Actualizado')
+}
+
+// ─── REASIGNAR ENCARGADO ─────────────────────────────────────────────────────
+window.reasignarEncargado = async function () {
+  if (!modalId) return
+  const encId = document.getElementById('sel-encargado').value || null
+  const enc = encargados.find(e=>e.id===encId)
+  const { error } = await sb.from('visitas').update({ encargado_id: encId, encargado_nombre: enc?.nombre||null }).eq('id', modalId)
+  if (error) { toast('Error al reasignar'); return }
+  toast(enc ? `Reasignado a ${enc.nombre}` : 'Encargado removido')
+  document.getElementById('modal-bg').classList.remove('open')
+}
+
+// ─── GUARDAR EDICIÓN ─────────────────────────────────────────────────────────
+window.guardarEdicion = async function () {
+  if (!modalId) return
+  const nombre = document.getElementById('edit-nombre').value.trim()
+  const tel = document.getElementById('edit-tel').value.trim()
+  const notas = document.getElementById('edit-notas').value.trim()
+  if (!nombre || !tel) { toast('Nombre y teléfono son obligatorios'); return }
+  const { error } = await sb.from('visitas').update({ nombre, tel, notas }).eq('id', modalId)
+  if (error) { toast('Error al guardar'); return }
+  toast('Datos actualizados')
+  document.getElementById('modal-bg').classList.remove('open')
 }
 
 // ─── GUARDAR SEGUIMIENTO ─────────────────────────────────────────────────────
@@ -436,8 +547,8 @@ function renderNotifs() {
     const tel = limTel(n.visita_tel||'')
     const msg = encodeURIComponent(`Hola ${n.visita_nombre}! Te saluda ${currentUser.nombre} de la Iglesia Siquem. Fue un gusto tenerte el ${fmt(n.visita_fecha)}. ¿Cómo estás? Queremos mantenernos en contacto. ¡Bendiciones!`)
     return `<div class="notif-item ${n.leida?'':'notif-new'}" onclick="leerNotif('${n.id}')">
-      <div class="notif-head"><span class="notif-titulo">Nueva asignación: ${n.visita_nombre}</span><span class="notif-fecha">${fmt(n.visita_fecha)}</span></div>
-      <div class="notif-body">${n.visita_genero==='F'?'Mujer':'Varón'}, ${n.visita_edad} años · ${n.visita_tel||''}</div>
+      <div class="notif-head"><span class="notif-titulo">Nueva asignación: ${esc(n.visita_nombre)}</span><span class="notif-fecha">${fmt(n.visita_fecha)}</span></div>
+      <div class="notif-body">${n.visita_genero==='F'?'Mujer':'Varón'}, ${n.visita_edad} años · ${esc(n.visita_tel||'')}</div>
       <button class="notif-wa" onclick="event.stopPropagation();window.open('https://wa.me/54${tel}?text=${msg}','_blank')">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
         Enviar WhatsApp de bienvenida

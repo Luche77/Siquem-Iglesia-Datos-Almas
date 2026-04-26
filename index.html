@@ -27,8 +27,8 @@
       <div class="logo-mark">
         <img src="Logo_Siquem_Blanco.png" alt="Siquem">
       </div>
-      <h1>Siquem</h1>
-      <p>Seguimiento pastoral</p>
+      <h1>Siquem Iglesia - Lugar de Refugio</h1>
+      <p>Seguimiento de Almas</p>
     </div>
     <div class="login-card">
       <div class="field">
@@ -139,10 +139,15 @@
     <!-- MIS ASIGNADOS -->
     <div id="page-mis-asignados" class="page">
       <div class="page-header"><h2>Mis asignados</h2><p class="page-sub">Personas a tu cargo</p></div>
+      <div class="search-wrap">
+        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" id="search-mios" class="search-input" placeholder="Buscar por nombre..." oninput="onSearchMios()">
+      </div>
       <div class="filter-row">
-        <button class="f-btn active" onclick="setFiltroMios('todos',this)">Todos</button>
+        <button class="f-btn active" onclick="setFiltroMios('todos',this)">Activos</button>
         <button class="f-btn" onclick="setFiltroMios('urgente',this)">Urgentes</button>
         <button class="f-btn" onclick="setFiltroMios('ok',this)">Al día</button>
+        <button class="f-btn" onclick="setFiltroMios('integrados',this)">Integrados</button>
       </div>
       <div id="list-mios"></div>
     </div>
@@ -150,10 +155,15 @@
     <!-- TODAS -->
     <div id="page-todas" class="page">
       <div class="page-header"><h2>Todas las visitas</h2><p class="page-sub">Vista completa del equipo</p></div>
+      <div class="search-wrap">
+        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" id="search-todas" class="search-input" placeholder="Buscar por nombre..." oninput="onSearchTodas()">
+      </div>
       <div class="filter-row">
-        <button class="f-btn active" onclick="setFiltroTodas('todas',this)">Todas</button>
+        <button class="f-btn active" onclick="setFiltroTodas('todas',this)">Activas</button>
         <button class="f-btn" onclick="setFiltroTodas('urgentes',this)">Urgentes</button>
         <button class="f-btn" onclick="setFiltroTodas('sin-asignar',this)">Sin asignar</button>
+        <button class="f-btn" onclick="setFiltroTodas('integrados',this)">Integrados</button>
       </div>
       <div id="list-todas"></div>
     </div>
