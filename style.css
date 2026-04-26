@@ -36,7 +36,8 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:'DM San
 .orb{display:none}
 .login-wrap{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;position:relative;z-index:1}
 .login-logo{text-align:center;margin-bottom:36px}
-.logo-mark{width:80px;height:80px;border-radius:50%;background:rgba(41,110,180,0.2);border:2px solid rgba(253,184,51,0.4);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;font-size:30px;color:var(--gold);animation:pulse 3s ease-in-out infinite}
+.logo-mark{width:90px;height:90px;border-radius:50%;background:rgba(41,110,180,0.2);border:2px solid rgba(253,184,51,0.4);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;overflow:hidden;animation:pulse 3s ease-in-out infinite}
+.logo-mark img{width:72px;height:72px;object-fit:contain;filter:brightness(0) invert(1)}
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.85;transform:scale(1.04)}}
 .login-logo h1{font-family:'DM Serif Display',serif;font-size:28px;font-weight:400;letter-spacing:-0.5px;color:var(--text);line-height:1.2}
 .login-logo p{color:var(--text2);font-size:13px;margin-top:6px}
