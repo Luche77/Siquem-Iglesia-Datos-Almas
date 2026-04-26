@@ -353,6 +353,8 @@ window.guardarEncargado = async function () {
   const { error } = await sb.from('encargados').insert({ nombre, usuario, pass, tel, cat, rol })
   if (error) { toast('Error: '+error.message); return }
   ;['e-nombre','e-usuario','e-pass','e-tel'].forEach(id=>document.getElementById(id).value='')
+  await cargarEncargados()
+  renderEquipo()
   toast(`${nombre} agregado al equipo`)
 }
 
