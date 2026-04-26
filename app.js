@@ -293,6 +293,7 @@ function renderEquipo() {
   if (!encargados.length) { el.innerHTML = '<div class="empty">Sin encargados aún</div>'; return }
   el.innerHTML = encargados.map(e => {
     const total = visitas.filter(v=>v.encargado_id===e.id && !esCerrada(v)).length
+    const puedeEliminar = currentUser.rol === 'admin' && e.id !== currentUser.id
     return `<div class="enc-card">
       <div class="v-av ${e.cat?.startsWith('mujer')?'av-f':'av-m'}">${initials(e.nombre)}</div>
       <div class="enc-info">
@@ -304,6 +305,9 @@ function renderEquipo() {
         </div>
       </div>
       <div class="enc-cnt"><div class="enc-cnt-n">${total}</div><div class="enc-cnt-l">activas</div></div>
+      ${puedeEliminar ? `<button class="btn-eliminar-enc" onclick="eliminarEncargado('${e.id}','${esc(e.nombre)}')" title="Eliminar">
+        <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+      </button>` : ''}
     </div>`
   }).join('')
 }
@@ -418,6 +422,14 @@ window.abrirModal = function (id) {
       </div>
     </div>` : ''
 
+  const eliminarHTML = isAdmin ? `
+    <div class="modal-section">
+      <button class="btn-eliminar-visita" onclick="eliminarVisita()">
+        <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+        Eliminar visita
+      </button>
+    </div>` : ''
+
   const editHTML = `
     <div class="modal-section">
       <div class="modal-section-title">Editar datos</div>
@@ -454,6 +466,7 @@ window.abrirModal = function (id) {
     </div>
     ${reasignarHTML}
     ${editHTML}
+    ${eliminarHTML}
     <div class="seg-section">
       <div class="seg-title">Historial de contactos</div>
       ${histHTML}
@@ -520,6 +533,28 @@ window.guardarEdicion = async function () {
   if (error) { toast('Error al guardar'); return }
   toast('Datos actualizados')
   document.getElementById('modal-bg').classList.remove('open')
+}
+
+// ─── ELIMINAR ENCARGADO ──────────────────────────────────────────────────────
+window.eliminarEncargado = async function (id, nombre) {
+  if (!confirm(`¿Eliminar a ${nombre} del equipo?\n\nSus visitas asignadas quedarán sin encargado.`)) return
+  const { error } = await sb.from('encargados').delete().eq('id', id)
+  if (error) { toast('Error al eliminar: '+error.message); return }
+  await cargarEncargados()
+  renderEquipo()
+  toast(`${nombre} eliminado del equipo`)
+}
+
+// ─── ELIMINAR VISITA ─────────────────────────────────────────────────────────
+window.eliminarVisita = async function () {
+  if (!modalId) return
+  const v = visitas.find(x=>x.id===modalId)
+  if (!v) return
+  if (!confirm(`¿Eliminar a ${v.nombre}?\n\nSe borrará toda su información e historial. Esta acción no se puede deshacer.`)) return
+  const { error } = await sb.from('visitas').delete().eq('id', modalId)
+  if (error) { toast('Error al eliminar'); return }
+  document.getElementById('modal-bg').classList.remove('open')
+  toast(`${v.nombre} eliminado`)
 }
 
 // ─── GUARDAR SEGUIMIENTO ─────────────────────────────────────────────────────
