@@ -1,563 +1,388 @@
-// ─── CONFIGURACIÓN FIREBASE ─────────────────────────────────────────────────
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import {
-  getFirestore, collection, doc, addDoc, updateDoc, deleteDoc,
-  getDocs, query, where, onSnapshot, serverTimestamp
-} from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm'
 
-const firebaseConfig = {
-  apiKey: "AIzaSyAgT6Akoz09lgMg5iWZjDaQN81UfGbnxJs",
-  authDomain: "siquem-iglesia-almas.firebaseapp.com",
-  projectId: "siquem-iglesia-almas",
-  storageBucket: "siquem-iglesia-almas.firebasestorage.app",
-  messagingSenderId: "266482272364",
-  appId: "1:266482272364:web:28089f6fd73e863362f049"
-};
+// ─── SUPABASE CONFIG ────────────────────────────────────────────────────────
+const SUPABASE_URL = 'https://xpzwqeeudodykmtueimu.supabase.co'
+const SUPABASE_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhwendxZWV1ZG9keWttdHVlaW11Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcyMDUzNjEsImV4cCI6MjA5Mjc4MTM2MX0.V3I5q59u7GxQgjSUT11AmsdHErMlEgrx1QFHHBwsDMk'
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON)
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-
-// ─── ESTADO GLOBAL ───────────────────────────────────────────────────────────
-let currentUser = null;
-let visitasCache = [];
-let encargadosCache = [];
-let notifsCache = [];
-let filtroMios = 'todos';
-let filtroTodas = 'todas';
-let modalVisitaId = null;
+// ─── ESTADO ─────────────────────────────────────────────────────────────────
+let currentUser = null
+let visitas = []
+let encargados = []
+let notifs = []
+let filtroMios = 'todos'
+let filtroTodas = 'todas'
+let modalId = null
 
 // ─── LOGIN ───────────────────────────────────────────────────────────────────
-window.doLogin = async function() {
-  const usuario = document.getElementById('login-user').value.trim().toLowerCase();
-  const pass = document.getElementById('login-pass').value;
-  const errEl = document.getElementById('login-error');
-  errEl.style.display = 'none';
+window.doLogin = async function () {
+  const usuario = document.getElementById('login-user').value.trim().toLowerCase()
+  const pass = document.getElementById('login-pass').value
+  const errEl = document.getElementById('login-error')
+  const btn = document.getElementById('btn-login')
+  errEl.style.display = 'none'
+  if (!usuario || !pass) { showError('Completá usuario y contraseña'); return }
 
-  if (!usuario || !pass) { showError('Completá usuario y contraseña'); return; }
+  btn.disabled = true
+  btn.textContent = 'Ingresando...'
 
   try {
+    // Admin por defecto hardcodeado
     if (usuario === 'admin' && pass === 'admin123') {
-      currentUser = { id: 'admin', nombre: 'Administrador', rol: 'admin', usuario: 'admin' };
-      sessionStorage.setItem('cv_user', JSON.stringify(currentUser));
-      iniciarApp();
-      return;
+      currentUser = { id: 'admin-local', nombre: 'Administrador', rol: 'admin', usuario: 'admin' }
+      sessionStorage.setItem('siquem_user', JSON.stringify(currentUser))
+      await iniciarApp()
+      return
     }
 
-    const encSnap = await getDocs(query(collection(db, 'encargados'), where('usuario', '==', usuario)));
-    if (encSnap.empty) { showError('Usuario no encontrado'); return; }
+    const { data, error } = await sb
+      .from('encargados')
+      .select('*')
+      .eq('usuario', usuario)
+      .single()
 
-    const encDoc = encSnap.docs[0];
-    const enc = { id: encDoc.id, ...encDoc.data() };
+    if (error || !data) { showError('Usuario no encontrado'); btn.disabled = false; btn.textContent = 'Ingresar'; return }
+    if (data.pass !== pass) { showError('Contraseña incorrecta'); btn.disabled = false; btn.textContent = 'Ingresar'; return }
 
-    if (enc.pass !== pass) { showError('Contraseña incorrecta'); return; }
-
-    currentUser = enc;
-    sessionStorage.setItem('cv_user', JSON.stringify(currentUser));
-    iniciarApp();
+    currentUser = data
+    sessionStorage.setItem('siquem_user', JSON.stringify(currentUser))
+    await iniciarApp()
   } catch (e) {
-    showError('Error de conexión. Verificá la configuración de Firebase.');
-    console.error(e);
+    showError('Error de conexión. Verificá el internet.')
+    console.error(e)
+    btn.disabled = false
+    btn.textContent = 'Ingresar'
   }
-};
-
-function showError(msg) {
-  const el = document.getElementById('login-error');
-  el.textContent = msg;
-  el.style.display = 'block';
 }
 
-window.doLogout = function() {
-  sessionStorage.removeItem('cv_user');
-  currentUser = null;
-  document.getElementById('screen-app').classList.remove('active');
-  document.getElementById('screen-login').classList.add('active');
-};
+function showError(msg) {
+  const el = document.getElementById('login-error')
+  el.textContent = msg; el.style.display = 'block'
+  document.getElementById('btn-login').disabled = false
+  document.getElementById('btn-login').textContent = 'Ingresar'
+}
+
+window.doLogout = function () {
+  sessionStorage.removeItem('siquem_user')
+  currentUser = null
+  document.getElementById('screen-app').classList.remove('active')
+  document.getElementById('screen-login').classList.add('active')
+  document.getElementById('login-user').value = ''
+  document.getElementById('login-pass').value = ''
+}
 
 // ─── INICIAR APP ─────────────────────────────────────────────────────────────
 async function iniciarApp() {
-  document.getElementById('screen-login').classList.remove('active');
-  document.getElementById('screen-app').classList.add('active');
+  document.getElementById('screen-login').classList.remove('active')
+  document.getElementById('screen-app').classList.add('active')
 
-  document.getElementById('header-user').textContent =
-    `${currentUser.nombre} · ${currentUser.rol === 'admin' ? 'Administrador' : 'Encargado'}`;
+  const isAdmin = currentUser.rol === 'admin'
+  document.getElementById('header-user').textContent = `${currentUser.nombre} · ${isAdmin ? 'Admin' : 'Encargado'}`
+  document.getElementById('nav-nueva').style.display = isAdmin ? '' : 'none'
+  document.getElementById('nav-todas').style.display = isAdmin ? '' : 'none'
+  document.getElementById('nav-equipo').style.display = isAdmin ? '' : 'none'
 
-  const h = new Date().getHours();
-  const saludo = h < 12 ? 'Buenos días' : h < 19 ? 'Buenas tardes' : 'Buenas noches';
-  document.getElementById('inicio-saludo').textContent = `${saludo}, ${currentUser.nombre.split(' ')[0]}`;
+  const h = new Date().getHours()
+  document.getElementById('saludo-text').textContent =
+    `${h < 12 ? 'Buenos días' : h < 19 ? 'Buenas tardes' : 'Buenas noches'}, ${currentUser.nombre.split(' ')[0]}`
 
-  const isAdmin = currentUser.rol === 'admin';
-  document.getElementById('nav-nueva').style.display = isAdmin ? '' : 'none';
-  document.getElementById('nav-todas').style.display = isAdmin ? '' : 'none';
-  document.getElementById('nav-encargados').style.display = isAdmin ? '' : 'none';
+  const dias = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado']
+  const meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre']
+  const hoy = new Date()
+  document.getElementById('fecha-hoy').textContent = `${dias[hoy.getDay()]} ${hoy.getDate()} de ${meses[hoy.getMonth()]}`
+  document.getElementById('f-fecha').value = hoy.toISOString().split('T')[0]
 
-  document.getElementById('f-fecha').value = new Date().toISOString().split('T')[0];
-
-  escucharVisitas();
-  escucharEncargados();
-  escucharNotificaciones();
-
-  showPage('inicio');
+  await Promise.all([cargarVisitas(), cargarEncargados(), cargarNotifs()])
+  showPage('inicio')
+  suscribirseRealtime()
 }
 
-// ─── LISTENERS FIREBASE ──────────────────────────────────────────────────────
-function escucharVisitas() {
-  onSnapshot(collection(db, 'visitas'), snap => {
-    visitasCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderInicio();
-    renderMisAsignados();
-    renderTodas();
-  });
+// ─── SUPABASE QUERIES ────────────────────────────────────────────────────────
+async function cargarVisitas() {
+  const { data } = await sb.from('visitas').select('*').order('created_at', { ascending: false })
+  visitas = data || []
 }
 
-function escucharEncargados() {
-  onSnapshot(collection(db, 'encargados'), snap => {
-    encargadosCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    renderEncargados();
-  });
+async function cargarEncargados() {
+  const { data } = await sb.from('encargados').select('*').order('nombre')
+  encargados = data || []
 }
 
-function escucharNotificaciones() {
-  if (!currentUser) return;
-  const q = query(collection(db, 'notificaciones'), where('paraId', '==', currentUser.id));
-  onSnapshot(q, snap => {
-    notifsCache = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    const noLeidas = notifsCache.filter(n => !n.leida).length;
-    document.getElementById('notif-dot').style.display = noLeidas > 0 ? 'block' : 'none';
-    renderNotificaciones();
-  });
+async function cargarNotifs() {
+  if (!currentUser) return
+  const { data } = await sb.from('notificaciones').select('*')
+    .eq('para_id', currentUser.id).order('created_at', { ascending: false })
+  notifs = data || []
+  const noLeidas = notifs.filter(n => !n.leida).length
+  document.getElementById('notif-dot').style.display = noLeidas > 0 ? 'block' : 'none'
+}
+
+function suscribirseRealtime() {
+  sb.channel('visitas-changes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'visitas' }, async () => {
+      await cargarVisitas(); renderPaginaActiva()
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'encargados' }, async () => {
+      await cargarEncargados(); renderPaginaActiva()
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'notificaciones' }, async () => {
+      await cargarNotifs(); renderNotifs()
+    })
+    .subscribe()
+}
+
+function renderPaginaActiva() {
+  const activa = document.querySelector('.page.active')?.id?.replace('page-', '')
+  if (activa) renderPagina(activa)
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
-function hoy() { const d = new Date(); d.setHours(0,0,0,0); return d; }
+function hoyDate() { const d = new Date(); d.setHours(0,0,0,0); return d }
 
-function diasDesde(fechaStr) {
-  if (!fechaStr) return 999;
-  const f = new Date(fechaStr); f.setHours(0,0,0,0);
-  return Math.floor((hoy() - f) / 86400000);
+function diasDesde(str) {
+  if (!str) return 999
+  const f = new Date(str); f.setHours(0,0,0,0)
+  return Math.floor((hoyDate() - f) / 86400000)
 }
 
 function diasSinContacto(v) {
-  if (v.historial && v.historial.length > 0) {
-    const ultimo = v.historial[v.historial.length - 1].fecha;
-    return diasDesde(ultimo);
-  }
-  return diasDesde(v.fecha);
+  if (v.historial?.length) return diasDesde(v.historial[v.historial.length - 1].fecha)
+  return diasDesde(v.fecha)
 }
 
-function diasBadge(dias) {
-  if (dias < 14) return `<span class="dias-badge dias-ok">${dias}d</span>`;
-  if (dias < 21) return `<span class="dias-badge dias-warn">${dias}d</span>`;
-  return `<span class="dias-badge dias-late">${dias}d</span>`;
+function dBadge(dias) {
+  if (dias < 14) return `<span class="d-badge d-ok">${dias}d</span>`
+  if (dias < 21) return `<span class="d-badge d-warn">${dias}d</span>`
+  return `<span class="d-badge d-late">${dias}d</span>`
 }
 
-function formatFecha(str) {
-  if (!str) return '-';
-  const [y,m,d] = str.split('-');
-  return `${d}/${m}/${y}`;
+function fmt(str) {
+  if (!str) return '-'
+  const [y,m,d] = str.split('-'); return `${d}/${m}/${y}`
 }
 
-function initials(nombre) {
-  return (nombre || '??').split(' ').map(w => w[0]).slice(0,2).join('').toUpperCase();
+function initials(n) { return (n||'??').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase() }
+
+function catLabel(c) {
+  return {'mujer-joven':'Mujeres jóvenes','mujer-adulta':'Mujeres adultas','varon-joven':'Varones jóvenes','varon-adulto':'Varones adultos'}[c]||c
 }
 
-function catLabel(cat) {
-  return { 'mujer-joven':'Mujeres jóvenes','mujer-adulta':'Mujeres adultas','varon-joven':'Varones jóvenes','varon-adulto':'Varones adultos' }[cat] || cat;
-}
-
-function catClass(cat) {
-  return { 'mujer-joven':'cat-mj','mujer-adulta':'cat-ma','varon-joven':'cat-vj','varon-adulto':'cat-va' }[cat] || '';
+function catClass(c) {
+  return {'mujer-joven':'b-mj','mujer-adulta':'b-ma','varon-joven':'b-vj','varon-adulto':'b-va'}[c]||''
 }
 
 function catDeVisita(genero, edad) {
-  const e = parseInt(edad) || 0;
-  if (genero === 'F') return e <= 35 ? 'mujer-joven' : 'mujer-adulta';
-  return e <= 35 ? 'varon-joven' : 'varon-adulto';
+  const e = parseInt(edad)||0
+  if (genero==='F') return e<=35?'mujer-joven':'mujer-adulta'
+  return e<=35?'varon-joven':'varon-adulto'
 }
 
-function limpiarTel(tel) {
-  return (tel || '').replace(/\D/g, '');
+function limTel(t) { return (t||'').replace(/\D/g,'') }
+
+function asignarEncargado(genero, edad) {
+  const cat = catDeVisita(genero, edad)
+  const cands = encargados.filter(e => e.cat === cat && e.rol !== 'admin')
+  if (!cands.length) return null
+  const conCnt = cands.map(e => ({ ...e, cnt: visitas.filter(v => v.encargado_id === e.id).length }))
+  conCnt.sort((a,b) => a.cnt - b.cnt)
+  return conCnt[0]
 }
 
-// ─── MENSAJE WA PARA CONTACTAR A LA VISITA ───────────────────────────────────
-function msgVisita(nombreVisita, nombreEncargado) {
-  return encodeURIComponent(
-    `Hola ${nombreVisita}, ¿cómo estás? ¡Dios te bendiga!\n` +
-    `Mi nombre es ${nombreEncargado}, te escribo de Siquem Iglesia, ` +
-    `de parte de los Pastores Omar y Patricia Bou Sleiman.`
-  );
+// ─── CARD VISITA ─────────────────────────────────────────────────────────────
+function vCard(v) {
+  const dias = diasSinContacto(v)
+  const enc = encargados.find(e => e.id === v.encargado_id)
+  return `<div class="v-card" onclick="abrirModal('${v.id}')">
+    <div class="v-av ${v.genero==='F'?'av-f':'av-m'}">${initials(v.nombre)}</div>
+    <div class="v-body">
+      <div class="v-nombre">${v.nombre}</div>
+      <div class="v-meta">${v.genero==='F'?'Mujer':'Varón'}, ${v.edad} años · ${fmt(v.fecha)}</div>
+      ${enc?`<div class="v-enc">${enc.nombre}</div>`:''}
+    </div>
+    <div class="v-right">${dBadge(dias)}<div class="d-label">${v.historial?.length?'últ. contacto':'desde visita'}</div></div>
+  </div>`
 }
 
 // ─── RENDER INICIO ───────────────────────────────────────────────────────────
 function renderInicio() {
-  const v = currentUser.rol === 'admin' ? visitasCache : visitasCache.filter(x => x.encargadoId === currentUser.id);
-  const urgentes = v.filter(x => diasSinContacto(x) >= 14);
-  const proximos = v.filter(x => { const d = diasSinContacto(x); return d >= 7 && d < 14; });
-  const ok = v.filter(x => diasSinContacto(x) < 7);
+  const base = currentUser.rol==='admin' ? visitas : visitas.filter(v=>v.encargado_id===currentUser.id)
+  const urg = base.filter(v=>diasSinContacto(v)>=14)
+  const prox = base.filter(v=>{const d=diasSinContacto(v);return d>=7&&d<14})
+  const ok = base.filter(v=>diasSinContacto(v)<7)
 
-  document.getElementById('stats-row').innerHTML = `
-    <div class="stat-card"><div class="stat-n">${v.length}</div><div class="stat-l">Total</div></div>
-    <div class="stat-card"><div class="stat-n" style="color:var(--danger)">${urgentes.length}</div><div class="stat-l">Urgentes</div></div>
-    <div class="stat-card"><div class="stat-n" style="color:var(--success)">${ok.length}</div><div class="stat-l">Al día</div></div>
-  `;
+  document.getElementById('stats-grid').innerHTML = `
+    <div class="stat-card"><div class="stat-n">${base.length}</div><div class="stat-l">Total</div></div>
+    <div class="stat-card"><div class="stat-n" style="color:var(--danger)">${urg.length}</div><div class="stat-l">Urgentes</div></div>
+    <div class="stat-card"><div class="stat-n" style="color:var(--ok)">${ok.length}</div><div class="stat-l">Al día</div></div>`
 
-  document.getElementById('cnt-urgentes').textContent = urgentes.length;
-  document.getElementById('cnt-proximos').textContent = proximos.length;
-
-  document.getElementById('list-urgentes').innerHTML = urgentes.length
-    ? urgentes.map(x => cardVisita(x)).join('')
-    : `<div class="empty-state">Sin pendientes urgentes 🎉</div>`;
-
-  document.getElementById('list-proximos').innerHTML = proximos.length
-    ? proximos.map(x => cardVisita(x)).join('')
-    : `<div class="empty-state" style="padding:16px">Ninguna en este rango</div>`;
-}
-
-// ─── CARD VISITA ─────────────────────────────────────────────────────────────
-function cardVisita(x) {
-  const dias = diasSinContacto(x);
-  const enc = encargadosCache.find(e => e.id === x.encargadoId);
-  return `<div class="visita-card" onclick="abrirModal('${x.id}')">
-    <div class="visita-avatar ${x.genero === 'F' ? 'av-f' : 'av-m'}">${initials(x.nombre)}</div>
-    <div class="visita-body">
-      <div class="visita-nombre">${x.nombre}</div>
-      <div class="visita-meta">${x.genero === 'F' ? 'Mujer' : 'Varón'}, ${x.edad} años · Visita: ${formatFecha(x.fecha)}</div>
-      ${enc ? `<div class="visita-enc">Encargado: ${enc.nombre}</div>` : ''}
-    </div>
-    <div class="visita-right">${diasBadge(dias)}<div class="dias-label">${x.historial?.length ? 'últ. contacto' : 'desde visita'}</div></div>
-  </div>`;
+  document.getElementById('cnt-urg').textContent = urg.length
+  document.getElementById('cnt-prox').textContent = prox.length
+  document.getElementById('list-urg').innerHTML = urg.length ? urg.map(vCard).join('') : '<div class="empty">Sin urgentes 🎉</div>'
+  document.getElementById('list-prox').innerHTML = prox.length ? prox.map(vCard).join('') : '<div class="empty" style="padding:12px">Ninguna en este rango</div>'
 }
 
 // ─── MIS ASIGNADOS ───────────────────────────────────────────────────────────
 function renderMisAsignados() {
-  let v = visitasCache.filter(x => x.encargadoId === currentUser.id);
-  if (filtroMios === 'urgente') v = v.filter(x => diasSinContacto(x) >= 14);
-  if (filtroMios === 'ok') v = v.filter(x => diasSinContacto(x) < 14);
-  const el = document.getElementById('list-mis-asignados');
-  el.innerHTML = v.length
-    ? v.map(x => cardVisita(x)).join('')
-    : `<div class="empty-state"><svg width="40" height="40" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>No tenés asignados aún</div>`;
+  let v = visitas.filter(x=>x.encargado_id===currentUser.id)
+  if (filtroMios==='urgente') v=v.filter(x=>diasSinContacto(x)>=14)
+  if (filtroMios==='ok') v=v.filter(x=>diasSinContacto(x)<14)
+  document.getElementById('list-mios').innerHTML = v.length ? v.map(vCard).join('') : '<div class="empty">No tenés asignados aún</div>'
 }
 
-window.filtrarMios = function(f, btn) {
-  filtroMios = f;
-  document.querySelectorAll('#page-mis-asignados .filter-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  renderMisAsignados();
-};
+window.setFiltroMios = function(f, btn) {
+  filtroMios = f
+  document.querySelectorAll('#page-mis-asignados .f-btn').forEach(b=>b.classList.remove('active'))
+  btn.classList.add('active'); renderMisAsignados()
+}
 
 // ─── TODAS ───────────────────────────────────────────────────────────────────
 function renderTodas() {
-  let v = [...visitasCache];
-  if (filtroTodas === 'urgentes') v = v.filter(x => diasSinContacto(x) >= 14);
-  if (filtroTodas === 'sin-asignar') v = v.filter(x => !x.encargadoId);
-  const el = document.getElementById('list-todas');
-  el.innerHTML = v.length
-    ? v.map(x => cardVisita(x)).join('')
-    : `<div class="empty-state">Sin visitas registradas aún</div>`;
+  let v = [...visitas]
+  if (filtroTodas==='urgentes') v=v.filter(x=>diasSinContacto(x)>=14)
+  if (filtroTodas==='sin-asignar') v=v.filter(x=>!x.encargado_id)
+  document.getElementById('list-todas').innerHTML = v.length ? v.map(vCard).join('') : '<div class="empty">Sin visitas aún</div>'
 }
 
-window.filtrarTodas = function(f, btn) {
-  filtroTodas = f;
-  document.querySelectorAll('#page-todas .filter-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  renderTodas();
-};
+window.setFiltroTodas = function(f, btn) {
+  filtroTodas = f
+  document.querySelectorAll('#page-todas .f-btn').forEach(b=>b.classList.remove('active'))
+  btn.classList.add('active'); renderTodas()
+}
 
-// ─── ENCARGADOS ──────────────────────────────────────────────────────────────
-function renderEncargados() {
-  const el = document.getElementById('list-encargados');
-  if (!encargadosCache.length) { el.innerHTML = '<div class="empty-state">Sin encargados aún</div>'; return; }
-  el.innerHTML = encargadosCache.map(e => {
-    const asignadas = visitasCache.filter(v => v.encargadoId === e.id).length;
+// ─── EQUIPO ──────────────────────────────────────────────────────────────────
+function renderEquipo() {
+  const el = document.getElementById('list-equipo')
+  if (!encargados.length) { el.innerHTML = '<div class="empty">Sin encargados aún</div>'; return }
+  el.innerHTML = encargados.map(e => {
+    const total = visitas.filter(v=>v.encargado_id===e.id).length
     return `<div class="enc-card">
-      <div class="visita-avatar ${e.cat?.startsWith('mujer') ? 'av-f' : 'av-m'}">${initials(e.nombre)}</div>
+      <div class="v-av ${e.cat?.startsWith('mujer')?'av-f':'av-m'}">${initials(e.nombre)}</div>
       <div class="enc-info">
         <div class="enc-nombre">${e.nombre}</div>
-        <div class="enc-meta">@${e.usuario} · ${e.tel || '-'}</div>
-        <span class="cat-label ${catClass(e.cat)}">${catLabel(e.cat)}</span>
-        <span class="enc-badge ${e.rol === 'admin' ? 'rol-admin' : 'rol-enc'}" style="margin-left:6px">${e.rol === 'admin' ? 'Admin' : 'Encargado'}</span>
+        <div class="enc-meta">@${e.usuario} · ${e.tel||'-'}</div>
+        <div class="enc-badges">
+          <span class="badge ${e.rol==='admin'?'b-admin':'b-enc'}">${e.rol==='admin'?'Admin':'Encargado'}</span>
+          <span class="badge ${catClass(e.cat)}">${catLabel(e.cat)}</span>
+        </div>
       </div>
-      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
-        <div class="enc-stats"><div class="enc-cnt">${asignadas}</div><div class="enc-cnt-l">asignadas</div></div>
-        <button class="btn-eliminar-enc" onclick="event.stopPropagation();eliminarEncargado('${e.id}','${e.nombre}')" title="Eliminar encargado">
-          <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <polyline points="3 6 5 6 21 6"/>
-            <path d="M19 6l-1 14H6L5 6"/>
-            <path d="M10 11v6"/><path d="M14 11v6"/>
-            <path d="M9 6V4h6v2"/>
-          </svg>
-        </button>
-      </div>
-    </div>`;
-  }).join('');
+      <div class="enc-cnt"><div class="enc-cnt-n">${total}</div><div class="enc-cnt-l">asignadas</div></div>
+    </div>`
+  }).join('')
 }
-
-// ─── ELIMINAR ENCARGADO CON REASIGNACIÓN ─────────────────────────────────────
-window.eliminarEncargado = async function(id, nombre) {
-  if (!confirm(`¿Seguro que querés eliminar a ${nombre} del equipo?\nSus visitas se reasignarán automáticamente.`)) return;
-
-  try {
-    // 1. Buscar todas las visitas asignadas a este encargado
-    const visitasDelEnc = visitasCache.filter(v => v.encargadoId === id);
-
-    // 2. Obtener la categoría del encargado que se va
-    const encQueSeVa = encargadosCache.find(e => e.id === id);
-    const cat = encQueSeVa?.cat;
-
-    // 3. Candidatos del mismo grupo (excluir al que se va y admins)
-    const candidatos = encargadosCache.filter(e => e.id !== id && e.cat === cat && e.rol !== 'admin');
-
-    // 4. Reasignar cada visita al candidato con menos carga
-    const notifsPorEnc = {}; // acumular visitas por encargado nuevo para notif agrupada
-
-    for (const visita of visitasDelEnc) {
-      // Recalcular conteo actualizado en cada iteración
-      const conConteo = candidatos.map(e => ({
-        ...e,
-        count: visitasCache.filter(v => v.encargadoId === e.id).length
-      }));
-      conConteo.sort((a, b) => a.count - b.count);
-      const nuevoEnc = conConteo[0];
-
-      if (nuevoEnc) {
-        // Actualizar visita en Firestore
-        await updateDoc(doc(db, 'visitas', visita.id), {
-          encargadoId: nuevoEnc.id,
-          encargadoNombre: nuevoEnc.nombre
-        });
-        // Actualizar cache local para que el conteo se recalcule bien
-        visita.encargadoId = nuevoEnc.id;
-        visita.encargadoNombre = nuevoEnc.nombre;
-
-        // Acumular para notificación agrupada
-        if (!notifsPorEnc[nuevoEnc.id]) {
-          notifsPorEnc[nuevoEnc.id] = { enc: nuevoEnc, visitas: [] };
-        }
-        notifsPorEnc[nuevoEnc.id].visitas.push(visita);
-      }
-    }
-
-    // 5. Crear una notificación por encargado que recibió reasignaciones
-    for (const entry of Object.values(notifsPorEnc)) {
-      const { enc: nuevoEnc, visitas: reasignadas } = entry;
-      const nombresVisitas = reasignadas.map(v => v.nombre).join(', ');
-      await addDoc(collection(db, 'notificaciones'), {
-        paraId: nuevoEnc.id,
-        paraNombre: nuevoEnc.nombre,
-        tipo: 'reasignacion',
-        visitaId: reasignadas[0].id, // para poder abrir la primera al tocar
-        visitaNombre: reasignadas.length === 1
-          ? reasignadas[0].nombre
-          : `${reasignadas.length} personas (${nombresVisitas})`,
-        visitaTel: reasignadas[0].tel,
-        visitaEdad: reasignadas[0].edad,
-        visitaGenero: reasignadas[0].genero,
-        visitaFecha: reasignadas[0].fecha,
-        leida: false,
-        creadoEn: serverTimestamp(),
-        esReasignacion: true,
-        encargadoAnterior: nombre
-      });
-    }
-
-    // 6. Eliminar el encargado
-    await deleteDoc(doc(db, 'encargados', id));
-
-    const totalReasignadas = visitasDelEnc.length;
-    showToast(totalReasignadas > 0
-      ? `${nombre} eliminado. ${totalReasignadas} visita${totalReasignadas > 1 ? 's' : ''} reasignada${totalReasignadas > 1 ? 's' : ''}.`
-      : `${nombre} eliminado del equipo.`
-    );
-  } catch(e) {
-    showToast('Error al eliminar. Revisá la conexión.');
-    console.error(e);
-  }
-};
-
-// ─── ASIGNACIÓN AUTOMÁTICA ───────────────────────────────────────────────────
-function asignarEncargado(genero, edad) {
-  const cat = catDeVisita(genero, edad);
-  const candidatos = encargadosCache.filter(e => e.cat === cat && e.rol !== 'admin');
-  if (!candidatos.length) return null;
-  const conConteo = candidatos.map(e => ({ ...e, count: visitasCache.filter(v => v.encargadoId === e.id).length }));
-  conConteo.sort((a, b) => a.count - b.count);
-  return conConteo[0];
-}
-
-function actualizarPreview() {
-  const genero = document.getElementById('f-genero').value;
-  const edad = document.getElementById('f-edad').value;
-  const preview = document.getElementById('asignacion-preview');
-  if (genero && edad) {
-    const enc = asignarEncargado(genero, edad);
-    preview.style.display = 'block';
-    preview.innerHTML = enc
-      ? `✦ Se asignará a <strong>${enc.nombre}</strong> (${catLabel(enc.cat)})`
-      : `⚠ No hay encargados disponibles para esta categoría`;
-  } else {
-    preview.style.display = 'none';
-  }
-}
-
-document.getElementById('f-genero')?.addEventListener('change', actualizarPreview);
-document.getElementById('f-edad')?.addEventListener('input', actualizarPreview);
 
 // ─── GUARDAR VISITA ──────────────────────────────────────────────────────────
-window.guardarVisita = async function() {
-  const nombre = document.getElementById('f-nombre').value.trim();
-  const edad = document.getElementById('f-edad').value;
-  const genero = document.getElementById('f-genero').value;
-  const tel = document.getElementById('f-tel').value.trim();
-  const fecha = document.getElementById('f-fecha').value;
-  const notas = document.getElementById('f-notas').value.trim();
+window.guardarVisita = async function () {
+  const nombre = document.getElementById('f-nombre').value.trim()
+  const edad = document.getElementById('f-edad').value
+  const genero = document.getElementById('f-genero').value
+  const tel = document.getElementById('f-tel').value.trim()
+  const fecha = document.getElementById('f-fecha').value
+  const notas = document.getElementById('f-notas').value.trim()
+  if (!nombre||!edad||!genero||!tel||!fecha) { toast('Completá todos los campos obligatorios'); return }
 
-  if (!nombre || !edad || !genero || !tel || !fecha) { showToast('Completá todos los campos obligatorios'); return; }
+  const enc = asignarEncargado(genero, edad)
+  const payload = { nombre, edad:parseInt(edad), genero, tel, fecha, notas, historial:[], encargado_id: enc?.id||null, encargado_nombre: enc?.nombre||null, creado_por: currentUser.id }
 
-  const enc = asignarEncargado(genero, edad);
-  const visita = {
-    nombre, edad: parseInt(edad), genero, tel, fecha, notas,
-    encargadoId: enc ? enc.id : null,
-    encargadoNombre: enc ? enc.nombre : null,
-    historial: [], creadoPor: currentUser.id, creadoEn: serverTimestamp()
-  };
+  const { data, error } = await sb.from('visitas').insert(payload).select().single()
+  if (error) { toast('Error al guardar: '+error.message); console.error(error); return }
 
-  try {
-    const docRef = await addDoc(collection(db, 'visitas'), visita);
-
-    if (enc) {
-      // Campanita en la app
-      await addDoc(collection(db, 'notificaciones'), {
-        paraId: enc.id, paraNombre: enc.nombre, tipo: 'nueva-asignacion',
-        visitaId: docRef.id, visitaNombre: nombre, visitaTel: tel,
-        visitaEdad: parseInt(edad), visitaGenero: genero, visitaFecha: fecha,
-        leida: false, creadoEn: serverTimestamp()
-      });
-
-      // WhatsApp automático al encargado
-      if (enc.tel) {
-        const telEnc = limpiarTel(enc.tel);
-        const msgEnc = encodeURIComponent(
-          `Hola ${enc.nombre}! Te fue asignada una nueva alma para contactarte.\n` +
-          `Nombre: ${nombre}\n` +
-          `Tel: ${tel}\n` +
-          `Fecha de Ingreso: ${formatFecha(fecha)}\n` +
-          `Podés contactarla/o desde la app.`
-        );
-        setTimeout(() => {
-          window.open(`https://wa.me/54${telEnc}?text=${msgEnc}`, '_blank');
-        }, 800);
-      }
-    }
-
-    // Limpiar form
-    ['f-nombre','f-edad','f-tel','f-notas'].forEach(id => document.getElementById(id).value = '');
-    document.getElementById('f-genero').value = '';
-    document.getElementById('f-fecha').value = new Date().toISOString().split('T')[0];
-    document.getElementById('asignacion-preview').style.display = 'none';
-
-    showToast(enc ? `Registrado y asignado a ${enc.nombre}` : 'Registrado sin encargado disponible');
-    showPage('inicio');
-  } catch(e) {
-    showToast('Error al guardar. Revisá la conexión.');
-    console.error(e);
+  // Notificación para el encargado
+  if (enc) {
+    await sb.from('notificaciones').insert({
+      para_id: enc.id, para_nombre: enc.nombre, tipo: 'nueva-asignacion',
+      visita_id: data.id, visita_nombre: nombre, visita_tel: tel,
+      visita_edad: parseInt(edad), visita_genero: genero, visita_fecha: fecha, leida: false
+    })
   }
-};
+
+  ;['f-nombre','f-edad','f-tel','f-notas'].forEach(id=>document.getElementById(id).value='')
+  document.getElementById('f-genero').value=''
+  document.getElementById('f-fecha').value=new Date().toISOString().split('T')[0]
+  document.getElementById('asig-preview').style.display='none'
+  toast(enc?`Registrado y asignado a ${enc.nombre}`:'Registrado sin encargado disponible')
+  showPage('inicio')
+}
 
 // ─── GUARDAR ENCARGADO ───────────────────────────────────────────────────────
-window.guardarEncargado = async function() {
-  const nombre = document.getElementById('e-nombre').value.trim();
-  const usuario = document.getElementById('e-usuario').value.trim().toLowerCase();
-  const pass = document.getElementById('e-pass').value.trim();
-  const tel = document.getElementById('e-tel').value.trim();
-  const cat = document.getElementById('e-cat').value;
-  const rol = document.getElementById('e-rol').value;
+window.guardarEncargado = async function () {
+  const nombre = document.getElementById('e-nombre').value.trim()
+  const usuario = document.getElementById('e-usuario').value.trim().toLowerCase()
+  const pass = document.getElementById('e-pass').value.trim()
+  const tel = document.getElementById('e-tel').value.trim()
+  const cat = document.getElementById('e-cat').value
+  const rol = document.getElementById('e-rol').value
+  if (!nombre||!usuario||!pass) { toast('Completá nombre, usuario y contraseña'); return }
 
-  if (!nombre || !usuario || !pass) { showToast('Completá nombre, usuario y contraseña'); return; }
+  const { error } = await sb.from('encargados').insert({ nombre, usuario, pass, tel, cat, rol })
+  if (error) { toast('Error: '+error.message); return }
+  ;['e-nombre','e-usuario','e-pass','e-tel'].forEach(id=>document.getElementById(id).value='')
+  toast(`${nombre} agregado al equipo`)
+}
 
-  try {
-    await addDoc(collection(db, 'encargados'), { nombre, usuario, pass, tel, cat, rol });
-    ['e-nombre','e-usuario','e-pass','e-tel'].forEach(id => document.getElementById(id).value = '');
-    showToast(`${nombre} agregado al equipo`);
-  } catch(e) {
-    showToast('Error al guardar'); console.error(e);
-  }
-};
+// ─── PREVIEW ASIGNACIÓN ──────────────────────────────────────────────────────
+function actualizarPreview() {
+  const genero = document.getElementById('f-genero').value
+  const edad = document.getElementById('f-edad').value
+  const preview = document.getElementById('asig-preview')
+  if (genero && edad) {
+    const enc = asignarEncargado(genero, edad)
+    preview.style.display = 'block'
+    preview.innerHTML = enc ? `✦ Se asignará a <strong>${enc.nombre}</strong> (${catLabel(enc.cat)})` : `⚠ Sin encargados disponibles para esta categoría`
+  } else preview.style.display = 'none'
+}
+document.getElementById('f-genero').addEventListener('change', actualizarPreview)
+document.getElementById('f-edad').addEventListener('input', actualizarPreview)
 
-// ─── MODAL DETALLE ───────────────────────────────────────────────────────────
-window.abrirModal = async function(id) {
-  const v = visitasCache.find(x => x.id === id);
-  if (!v) return;
-  modalVisitaId = id;
+// ─── MODAL ───────────────────────────────────────────────────────────────────
+window.abrirModal = function (id) {
+  const v = visitas.find(x=>x.id===id)
+  if (!v) return
+  modalId = id
+  const enc = encargados.find(e=>e.id===v.encargado_id)
+  const dias = diasSinContacto(v)
+  const tel = limTel(v.tel)
 
-  const enc = encargadosCache.find(e => e.id === v.encargadoId);
-  const dias = diasSinContacto(v);
-  const telLimpio = limpiarTel(v.tel);
-  const waMsg = msgVisita(v.nombre, currentUser.nombre);
-
-  const histHTML = (v.historial || []).length
-    ? [...v.historial].reverse().map(h => `
-      <div class="historial-item">
-        <div class="hist-head">
-          <span class="hist-fecha">${formatFecha(h.fecha)}</span>
-          <span class="hist-medio medio-${h.medio}">${h.medio}</span>
-        </div>
-        ${h.obs ? `<div class="hist-obs">${h.obs}</div>` : ''}
-      </div>`).join('')
-    : `<div style="font-size:13px;color:var(--text3);padding:8px 0">Sin contactos registrados aún</div>`;
-
-  const btnEliminar = currentUser.rol === 'admin' ? `
-    <button onclick="eliminarVisita('${v.id}')" style="
-      width:100%; margin-top:12px; padding:11px 16px;
-      background:transparent; color:#e05555;
-      border:1.5px solid #e05555; border-radius:10px;
-      font-size:14px; font-weight:500; cursor:pointer;
-      display:flex; align-items:center; justify-content:center; gap:7px;">
-      <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-        <polyline points="3 6 5 6 21 6"/>
-        <path d="M19 6l-1 14H6L5 6"/>
-        <path d="M10 11v6"/><path d="M14 11v6"/>
-        <path d="M9 6V4h6v2"/>
-      </svg>
-      Eliminar visita
-    </button>` : '';
+  const histHTML = v.historial?.length
+    ? [...v.historial].reverse().map(h=>`
+        <div class="hist-item">
+          <div class="hist-head"><span class="hist-fecha">${fmt(h.fecha)}</span><span class="hist-medio m-${h.medio}">${h.medio}</span></div>
+          ${h.obs?`<div class="hist-obs">${h.obs}</div>`:''}
+          <div class="hist-by">Registrado por ${h.por||'—'}</div>
+        </div>`).join('')
+    : `<div style="font-size:13px;color:var(--text3);padding:6px 0">Sin contactos registrados aún</div>`
 
   document.getElementById('modal-content').innerHTML = `
     <div class="modal-inner">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
-        <div class="visita-avatar ${v.genero==='F'?'av-f':'av-m'}" style="width:52px;height:52px;font-size:16px">${initials(v.nombre)}</div>
+        <div class="v-av ${v.genero==='F'?'av-f':'av-m'}" style="width:50px;height:50px;font-size:15px;flex-shrink:0">${initials(v.nombre)}</div>
         <div>
-          <div class="modal-name">${v.nombre}</div>
-          <div class="modal-sub">${v.genero==='F'?'Mujer':'Varón'}, ${v.edad} años · ${diasBadge(dias)}</div>
+          <div class="modal-nombre">${v.nombre}</div>
+          <div class="modal-sub">${v.genero==='F'?'Mujer':'Varón'}, ${v.edad} años · ${dBadge(dias)}</div>
         </div>
       </div>
-      <div class="info-row"><span class="info-label">Teléfono</span><span class="info-val"><a href="tel:${v.tel}">${v.tel}</a></span></div>
-      <div class="info-row"><span class="info-label">Visita</span><span class="info-val">${formatFecha(v.fecha)}</span></div>
-      <div class="info-row"><span class="info-label">Encargado</span><span class="info-val">${enc ? enc.nombre : 'Sin asignar'}</span></div>
-      ${v.notas ? `<div class="info-row"><span class="info-label">Notas</span><span class="info-val">${v.notas}</span></div>` : ''}
+      <div class="info-row"><span class="info-lbl">Teléfono</span><span class="info-val"><a href="tel:${v.tel}">${v.tel}</a></span></div>
+      <div class="info-row"><span class="info-lbl">Visita</span><span class="info-val">${fmt(v.fecha)}</span></div>
+      <div class="info-row"><span class="info-lbl">Encargado</span><span class="info-val">${enc?enc.nombre:'Sin asignar'}</span></div>
+      ${v.notas?`<div class="info-row"><span class="info-lbl">Notas</span><span class="info-val">${v.notas}</span></div>`:''}
     </div>
-    <div class="modal-actions">
-      <button class="btn-whatsapp" onclick="window.open('https://wa.me/54${telLimpio}?text=${waMsg}','_blank')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+    <div class="modal-btns">
+      <button class="btn-wa" onclick="window.open('https://wa.me/54${tel}','_blank')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
         WhatsApp
       </button>
       <a href="tel:${v.tel}" class="btn-primary" style="text-decoration:none;flex:1;margin-top:0">
-        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.4 2 2 0 0 1 3.6 1.21h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.84a16 16 0 0 0 6 6l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.73 16.92z"/></svg>
+        <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.4 2 2 0 0 1 3.6 1.21h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.84a16 16 0 0 0 6 6l.95-.95a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.73 16.92z"/></svg>
         Llamar
       </a>
     </div>
-    ${btnEliminar}
-    <div class="seguimiento-section">
-      <div class="seguimiento-title">Historial de contactos</div>
+    <div class="seg-section">
+      <div class="seg-title">Historial de contactos</div>
       ${histHTML}
       <div class="nuevo-seg">
         <div class="nuevo-seg-title">Registrar nuevo contacto</div>
         <div class="seg-row">
-          <div class="field" style="margin-bottom:0">
-            <label>Fecha</label>
-            <input id="seg-fecha" type="date" value="${new Date().toISOString().split('T')[0]}">
-          </div>
-          <div class="field" style="margin-bottom:0">
-            <label>Medio</label>
+          <div class="field" style="margin-bottom:0"><label>Fecha</label><input id="seg-fecha" type="date" value="${new Date().toISOString().split('T')[0]}"></div>
+          <div class="field" style="margin-bottom:0"><label>Medio</label>
             <select id="seg-medio">
               <option value="whatsapp">WhatsApp</option>
               <option value="llamada">Llamada</option>
@@ -567,127 +392,91 @@ window.abrirModal = async function(id) {
         </div>
         <div class="field" style="margin-top:10px;margin-bottom:0">
           <label>Observaciones</label>
-          <textarea id="seg-obs" placeholder="Ej: Contestó, quedamos en invitarla el próximo domingo..." rows="3"></textarea>
+          <textarea id="seg-obs" rows="3" placeholder="Ej: Contestó, quedamos en invitarla el próximo domingo..."></textarea>
         </div>
         <button class="btn-primary" style="margin-top:10px" onclick="guardarSeguimiento()">
-          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+          <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
           Guardar contacto
         </button>
       </div>
-    </div>
-  `;
+    </div>`
 
-  document.getElementById('modal-bg').classList.add('open');
-};
-
-window.cerrarModal = function(e) {
-  if (!e || e.target === document.getElementById('modal-bg'))
-    document.getElementById('modal-bg').classList.remove('open');
-};
-
-// ─── ELIMINAR VISITA ─────────────────────────────────────────────────────────
-window.eliminarVisita = async function(id) {
-  if (!confirm('¿Seguro que querés eliminar esta visita?\nEsta acción no se puede deshacer.')) return;
-  try {
-    await deleteDoc(doc(db, 'visitas', id));
-    document.getElementById('modal-bg').classList.remove('open');
-    showToast('Visita eliminada correctamente');
-  } catch(e) {
-    showToast('Error al eliminar. Revisá la conexión.');
-    console.error(e);
-  }
-};
-
-// ─── GUARDAR SEGUIMIENTO ─────────────────────────────────────────────────────
-window.guardarSeguimiento = async function() {
-  if (!modalVisitaId) return;
-  const fecha = document.getElementById('seg-fecha').value;
-  const medio = document.getElementById('seg-medio').value;
-  const obs = document.getElementById('seg-obs').value.trim();
-  if (!fecha) { showToast('Seleccioná la fecha'); return; }
-
-  const v = visitasCache.find(x => x.id === modalVisitaId);
-  if (!v) return;
-
-  const historial = [...(v.historial || []), { fecha, medio, obs, registradoPor: currentUser.nombre }];
-
-  try {
-    await updateDoc(doc(db, 'visitas', modalVisitaId), { historial });
-    document.getElementById('modal-bg').classList.remove('open');
-    showToast('Contacto registrado');
-  } catch(e) {
-    showToast('Error al guardar'); console.error(e);
-  }
-};
-
-// ─── NOTIFICACIONES ──────────────────────────────────────────────────────────
-function renderNotificaciones() {
-  const el = document.getElementById('list-notificaciones');
-  if (!notifsCache.length) {
-    el.innerHTML = '<div class="empty-state">Sin notificaciones</div>';
-    return;
-  }
-  el.innerHTML = [...notifsCache].reverse().map(n => {
-    const esReasig = n.esReasignacion;
-    const icono = esReasig ? '🔄' : '🔔';
-    const titulo = esReasig
-      ? `Reasignación de ${n.encargadoAnterior}: ${n.visitaNombre}`
-      : `Nueva asignación: ${n.visitaNombre}`;
-    const subtitulo = esReasig
-      ? `Estas personas fueron reasignadas a vos`
-      : `${n.visitaGenero === 'F' ? 'Mujer' : 'Varón'}, ${n.visitaEdad} años · ${n.visitaTel || ''}`;
-
-    return `<div class="notif-item ${n.leida ? '' : 'notif-new'}" onclick="abrirDesdeNotif('${n.id}','${n.visitaId}')">
-      <div class="notif-head">
-        <span class="notif-titulo">${icono} ${titulo}</span>
-        <span class="notif-fecha">${n.visitaFecha ? formatFecha(n.visitaFecha) : ''}</span>
-      </div>
-      <div class="notif-body">${subtitulo}</div>
-      <div style="font-size:12px;color:var(--accent2);margin-top:8px;">
-        Tocá para ver el perfil →
-      </div>
-    </div>`;
-  }).join('');
+  document.getElementById('modal-bg').classList.add('open')
 }
 
-// ─── ABRIR MODAL DESDE NOTIFICACIÓN ──────────────────────────────────────────
-window.abrirDesdeNotif = async function(notifId, visitaId) {
-  try { await updateDoc(doc(db, 'notificaciones', notifId), { leida: true }); } catch(e) {}
-  showPage('mis-asignados');
-  setTimeout(() => abrirModal(visitaId), 150);
-};
+window.cerrarModal = function (e) {
+  if (!e || e.target===document.getElementById('modal-bg'))
+    document.getElementById('modal-bg').classList.remove('open')
+}
 
-window.marcarNotifLeida = async function(id) {
-  try { await updateDoc(doc(db, 'notificaciones', id), { leida: true }); }
-  catch(e) { console.error(e); }
-};
+// ─── GUARDAR SEGUIMIENTO ─────────────────────────────────────────────────────
+window.guardarSeguimiento = async function () {
+  if (!modalId) return
+  const fecha = document.getElementById('seg-fecha').value
+  const medio = document.getElementById('seg-medio').value
+  const obs = document.getElementById('seg-obs').value.trim()
+  if (!fecha) { toast('Seleccioná la fecha'); return }
+
+  const v = visitas.find(x=>x.id===modalId)
+  if (!v) return
+
+  const historial = [...(v.historial||[]), { fecha, medio, obs, por: currentUser.nombre }]
+  const { error } = await sb.from('visitas').update({ historial }).eq('id', modalId)
+  if (error) { toast('Error al guardar'); console.error(error); return }
+
+  document.getElementById('modal-bg').classList.remove('open')
+  toast('Contacto registrado')
+}
+
+// ─── NOTIFICACIONES ──────────────────────────────────────────────────────────
+function renderNotifs() {
+  const el = document.getElementById('list-notifs')
+  if (!notifs.length) { el.innerHTML='<div class="empty">Sin notificaciones</div>'; return }
+  el.innerHTML = notifs.map(n => {
+    const tel = limTel(n.visita_tel||'')
+    const msg = encodeURIComponent(`Hola ${n.visita_nombre}! Te saluda ${currentUser.nombre} de la Iglesia Siquem. Fue un gusto tenerte el ${fmt(n.visita_fecha)}. ¿Cómo estás? Queremos mantenernos en contacto. ¡Bendiciones!`)
+    return `<div class="notif-item ${n.leida?'':'notif-new'}" onclick="leerNotif('${n.id}')">
+      <div class="notif-head"><span class="notif-titulo">Nueva asignación: ${n.visita_nombre}</span><span class="notif-fecha">${fmt(n.visita_fecha)}</span></div>
+      <div class="notif-body">${n.visita_genero==='F'?'Mujer':'Varón'}, ${n.visita_edad} años · ${n.visita_tel||''}</div>
+      <button class="notif-wa" onclick="event.stopPropagation();window.open('https://wa.me/54${tel}?text=${msg}','_blank')">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+        Enviar WhatsApp de bienvenida
+      </button>
+    </div>`
+  }).join('')
+}
+
+window.leerNotif = async function (id) {
+  await sb.from('notificaciones').update({ leida: true }).eq('id', id)
+}
 
 // ─── NAVEGACIÓN ──────────────────────────────────────────────────────────────
-window.showPage = function(p) {
-  document.querySelectorAll('.page').forEach(x => x.classList.remove('active'));
-  document.querySelectorAll('.nav-btn').forEach(x => x.classList.remove('active'));
-  const pageEl = document.getElementById('page-' + p);
-  if (pageEl) pageEl.classList.add('active');
-  const navBtn = document.querySelector(`[data-page="${p}"]`);
-  if (navBtn) navBtn.classList.add('active');
-  if (p === 'inicio') renderInicio();
-  if (p === 'mis-asignados') renderMisAsignados();
-  if (p === 'todas') renderTodas();
-  if (p === 'encargados') renderEncargados();
-  if (p === 'notificaciones') renderNotificaciones();
-};
+function renderPagina(p) {
+  if (p==='inicio') renderInicio()
+  else if (p==='mis-asignados') renderMisAsignados()
+  else if (p==='todas') renderTodas()
+  else if (p==='equipo') renderEquipo()
+  else if (p==='notificaciones') renderNotifs()
+}
+
+window.showPage = function (p) {
+  document.querySelectorAll('.page').forEach(x=>x.classList.remove('active'))
+  document.querySelectorAll('.nav-btn').forEach(x=>x.classList.remove('active'))
+  const pg = document.getElementById('page-'+p)
+  if (pg) pg.classList.add('active')
+  const nb = document.querySelector(`[data-page="${p}"]`)
+  if (nb) nb.classList.add('active')
+  renderPagina(p)
+  if (p==='notificaciones') notifs.filter(n=>!n.leida).forEach(n=>leerNotif(n.id))
+}
 
 // ─── TOAST ───────────────────────────────────────────────────────────────────
-function showToast(msg) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), 2500);
+function toast(msg) {
+  const t = document.getElementById('toast')
+  t.textContent = msg; t.classList.add('show')
+  setTimeout(()=>t.classList.remove('show'), 2500)
 }
 
 // ─── AUTO-LOGIN ──────────────────────────────────────────────────────────────
-const savedUser = sessionStorage.getItem('cv_user');
-if (savedUser) {
-  currentUser = JSON.parse(savedUser);
-  iniciarApp();
-}
+const saved = sessionStorage.getItem('siquem_user')
+if (saved) { currentUser = JSON.parse(saved); iniciarApp() }
