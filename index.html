@@ -121,7 +121,12 @@
         <p class="page-sub">Registrar persona nueva</p>
       </div>
       <div class="card">
+        <div class="field"><label>¿Quién tomó los datos?</label><input id="f-tomado-por" type="text" placeholder="Nombre del receptor"></div>
         <div class="field"><label>Nombre completo *</label><input id="f-nombre" type="text" placeholder="Ej: María González"></div>
+        <div class="field"><label>Teléfono (WhatsApp) *</label><input id="f-tel" type="tel" placeholder="Ej: 2477 123456"></div>
+        <div class="field"><label>Dirección</label><input id="f-direccion" type="text" placeholder="Ej: Rivadavia 1234"></div>
+        <div class="field"><label>Barrio</label><input id="f-barrio" type="text" placeholder="Ej: Centro"></div>
+        <div class="field"><label>Localidad</label><input id="f-localidad" type="text" placeholder="Ej: Junín"></div>
         <div class="field-row">
           <div class="field"><label>Edad *</label><input id="f-edad" type="number" placeholder="28" min="1" max="110"></div>
           <div class="field"><label>Género *</label>
@@ -132,14 +137,6 @@
             </select>
           </div>
         </div>
-        <div class="field"><label>Teléfono (WhatsApp) *</label><input id="f-tel" type="tel" placeholder="Ej: 2477 123456"></div>
-        <div class="field"><label>Fecha de visita *</label><input id="f-fecha" type="date"></div>
-        <div class="field"><label>Notas iniciales</label><textarea id="f-notas" rows="3" placeholder="Ej: Vino con su familia, preguntó por el grupo de jóvenes..."></textarea></div>
-        <div class="field"><label>Dirección</label><input id="f-direccion" type="text" placeholder="Ej: Rivadavia 1234"></div>
-        <div class="field-row">
-          <div class="field"><label>Barrio</label><input id="f-barrio" type="text" placeholder="Ej: Centro"></div>
-          <div class="field"><label>Localidad</label><input id="f-localidad" type="text" placeholder="Ej: Junín"></div>
-        </div>
         <div class="field">
           <label>Tipo de decisión</label>
           <div class="tipo-decision-row">
@@ -147,7 +144,8 @@
             <button type="button" class="td-btn td-reconciliacion" onclick="setTipoDecision('reconciliacion',this)">Reconciliación</button>
           </div>
         </div>
-        <div class="field"><label>¿Quién tomó los datos?</label><input id="f-tomado-por" type="text" placeholder="Nombre del receptor"></div>
+        <div class="field"><label>Notas iniciales</label><textarea id="f-notas" rows="3" placeholder="Ej: Vino con su familia, preguntó por el grupo de jóvenes..."></textarea></div>
+        <div class="field"><label>Fecha de visita *</label><input id="f-fecha" type="date"></div>
         <div id="asig-preview" class="asig-preview" style="display:none"></div>
         <div class="btn-row">
           <button class="btn-primary" onclick="guardarVisita(true)">
