@@ -86,6 +86,13 @@
       <svg width="19" height="19" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
       <span>Equipo</span>
     </button>
+    <button class="nav-btn" data-page="pendientes" onclick="showPage('pendientes')" id="nav-pendientes">
+      <span style="position:relative;display:inline-flex;align-items:center;justify-content:center">
+        <svg width="19" height="19" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        <span class="pend-cnt" id="pend-cnt" style="display:none"></span>
+      </span>
+      <span>Pendientes</span>
+    </button>
   </nav>
 
   <main class="app-main">
@@ -128,11 +135,27 @@
         <div class="field"><label>Teléfono (WhatsApp) *</label><input id="f-tel" type="tel" placeholder="Ej: 2477 123456"></div>
         <div class="field"><label>Fecha de visita *</label><input id="f-fecha" type="date"></div>
         <div class="field"><label>Notas iniciales</label><textarea id="f-notas" rows="3" placeholder="Ej: Vino con su familia, preguntó por el grupo de jóvenes..."></textarea></div>
+        <div class="field"><label>Dirección</label><input id="f-direccion" type="text" placeholder="Ej: Rivadavia 1234"></div>
+        <div class="field-row">
+          <div class="field"><label>Barrio</label><input id="f-barrio" type="text" placeholder="Ej: Centro"></div>
+          <div class="field"><label>Localidad</label><input id="f-localidad" type="text" placeholder="Ej: Junín"></div>
+        </div>
+        <div class="field">
+          <label>Tipo de decisión</label>
+          <div class="tipo-decision-row">
+            <button type="button" class="td-btn td-conversion" onclick="setTipoDecision('conversion',this)">Conversión</button>
+            <button type="button" class="td-btn td-reconciliacion" onclick="setTipoDecision('reconciliacion',this)">Reconciliación</button>
+          </div>
+        </div>
+        <div class="field"><label>¿Quién tomó los datos?</label><input id="f-tomado-por" type="text" placeholder="Nombre del receptor"></div>
         <div id="asig-preview" class="asig-preview" style="display:none"></div>
-        <button class="btn-primary" onclick="guardarVisita()">
-          <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-          Registrar y asignar encargado
-        </button>
+        <div class="btn-row">
+          <button class="btn-primary" onclick="guardarVisita(true)">
+            <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+            Registrar y asignar
+          </button>
+          <button class="btn-ghost" onclick="guardarVisita(false)">Solo registrar</button>
+        </div>
       </div>
     </div>
 
@@ -182,9 +205,11 @@
         <div class="field-row">
           <div class="field"><label>Categoría</label>
             <select id="e-cat">
-              <option value="mujer-joven">Mujeres jóvenes (≤35)</option>
+              <option value="mujer-menor">Mujeres menores (&lt;15)</option>
+              <option value="mujer-joven">Mujeres jóvenes (15-35)</option>
               <option value="mujer-adulta">Mujeres adultas (36+)</option>
-              <option value="varon-joven">Varones jóvenes (≤35)</option>
+              <option value="varon-menor">Varones menores (&lt;15)</option>
+              <option value="varon-joven">Varones jóvenes (15-35)</option>
               <option value="varon-adulto">Varones adultos (36+)</option>
             </select>
           </div>
@@ -201,6 +226,12 @@
         <div class="section-label" style="margin-bottom:12px">Equipo actual</div>
         <div id="list-equipo"></div>
       </div>
+    </div>
+
+    <!-- PENDIENTES -->
+    <div id="page-pendientes" class="page">
+      <div class="page-header"><h2>Pendientes</h2><p class="page-sub">Almas sin encargado asignado</p></div>
+      <div id="list-pendientes"></div>
     </div>
 
     <!-- NOTIFICACIONES -->

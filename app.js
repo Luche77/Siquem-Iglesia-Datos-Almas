@@ -13,6 +13,7 @@ let notifs = []
 let filtroMios = 'todos'
 let filtroTodas = 'todas'
 let modalId = null
+let tipoDecision = null
 
 // ─── XSS ────────────────────────────────────────────────────────────────────
 function esc(str) {
@@ -81,6 +82,7 @@ async function iniciarApp() {
   document.getElementById('nav-nueva').style.display = isAdmin ? '' : 'none'
   document.getElementById('nav-todas').style.display = isAdmin ? '' : 'none'
   document.getElementById('nav-equipo').style.display = isAdmin ? '' : 'none'
+  document.getElementById('nav-pendientes').style.display = isAdmin ? '' : 'none'
 
   const h = new Date().getHours()
   document.getElementById('saludo-text').textContent =
@@ -93,6 +95,7 @@ async function iniciarApp() {
   document.getElementById('f-fecha').value = hoy.toISOString().split('T')[0]
 
   await Promise.all([cargarVisitas(), cargarEncargados(), cargarNotifs()])
+  actualizarContadorPendientes()
   showPage('inicio')
   suscribirseRealtime()
 }
@@ -120,7 +123,9 @@ async function cargarNotifs() {
 function suscribirseRealtime() {
   sb.channel('visitas-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'visitas' }, async () => {
-      await cargarVisitas(); renderPaginaActiva()
+      await cargarVisitas()
+      actualizarContadorPendientes()
+      renderPaginaActiva()
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'encargados' }, async () => {
       await cargarEncargados(); renderPaginaActiva()
@@ -164,23 +169,42 @@ function fmt(str) {
 function initials(n) { return (n||'??').split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase() }
 
 function catLabel(c) {
-  return {'mujer-joven':'Mujeres jóvenes','mujer-adulta':'Mujeres adultas','varon-joven':'Varones jóvenes','varon-adulto':'Varones adultos'}[c]||c
+  return {
+    'mujer-menor':  'Mujeres menores',
+    'mujer-joven':  'Mujeres jóvenes',
+    'mujer-adulta': 'Mujeres adultas',
+    'varon-menor':  'Varones menores',
+    'varon-joven':  'Varones jóvenes',
+    'varon-adulto': 'Varones adultos'
+  }[c] || c
 }
 
 function catClass(c) {
-  return {'mujer-joven':'b-mj','mujer-adulta':'b-ma','varon-joven':'b-vj','varon-adulto':'b-va'}[c]||''
+  return {
+    'mujer-menor':  'b-mm',
+    'mujer-joven':  'b-mj',
+    'mujer-adulta': 'b-ma',
+    'varon-menor':  'b-vm',
+    'varon-joven':  'b-vj',
+    'varon-adulto': 'b-va'
+  }[c] || ''
 }
 
 function catDeVisita(genero, edad) {
-  const e = parseInt(edad)||0
-  if (genero==='F') return e<=35?'mujer-joven':'mujer-adulta'
-  return e<=35?'varon-joven':'varon-adulto'
+  const e = parseInt(edad) || 0
+  if (e < 15) return genero === 'F' ? 'mujer-menor' : 'varon-menor'
+  if (genero === 'F') return e <= 35 ? 'mujer-joven' : 'mujer-adulta'
+  return e <= 35 ? 'varon-joven' : 'varon-adulto'
 }
 
 function limTel(t) { return (t||'').replace(/\D/g,'') }
 
 function esCerrada(v) {
   return v.estado === 'integrado' || v.estado === 'no-continuo'
+}
+
+function tdLabel(td) {
+  return td === 'conversion' ? 'Conversión' : td === 'reconciliacion' ? 'Reconciliación' : ''
 }
 
 function asignarEncargado(genero, edad) {
@@ -207,12 +231,14 @@ function vCard(v) {
   else if (v.estado === 'no-continuo') badge = `<span class="d-badge d-nc">No continuó</span>`
   else badge = dBadge(dias)
 
+  const decLabel = v.tipo_decision ? ` · ${v.tipo_decision === 'conversion' ? 'Conv.' : 'Rec.'}` : ''
+
   return `<div class="v-card${cerrada?' v-card-closed':''}" onclick="abrirModal('${v.id}')">
     <div class="v-av ${v.genero==='F'?'av-f':'av-m'}">${initials(v.nombre)}</div>
     <div class="v-body">
       <div class="v-nombre">${esc(v.nombre)}</div>
-      <div class="v-meta">${v.genero==='F'?'Mujer':'Varón'}, ${v.edad} años · ${fmt(v.fecha)}</div>
-      ${enc?`<div class="v-enc">${esc(enc.nombre)}</div>`:''}
+      <div class="v-meta">${v.genero==='F'?'Mujer':'Varón'}, ${v.edad} años · ${fmt(v.fecha)}${decLabel}</div>
+      ${enc ? `<div class="v-enc">${esc(enc.nombre)}</div>` : '<div class="v-enc v-enc-pending">Sin asignar</div>'}
     </div>
     <div class="v-right">${badge}${!cerrada?`<div class="d-label">${v.historial?.length?'últ. contacto':'desde visita'}</div>`:''}</div>
   </div>`
@@ -287,6 +313,20 @@ window.setFiltroTodas = function(f, btn) {
 
 window.onSearchTodas = function() { renderTodas() }
 
+// ─── PENDIENTES ──────────────────────────────────────────────────────────────
+function renderPendientes() {
+  const v = visitas.filter(x => !x.encargado_id && !esCerrada(x))
+  const el = document.getElementById('list-pendientes')
+  if (!el) return
+  el.innerHTML = v.length ? v.map(vCard).join('') : '<div class="empty">Sin asignaciones pendientes</div>'
+}
+
+function actualizarContadorPendientes() {
+  const count = visitas.filter(x => !x.encargado_id && !esCerrada(x)).length
+  const el = document.getElementById('pend-cnt')
+  if (el) { el.textContent = count; el.style.display = count > 0 ? 'flex' : 'none' }
+}
+
 // ─── EQUIPO ──────────────────────────────────────────────────────────────────
 function renderEquipo() {
   const el = document.getElementById('list-equipo')
@@ -312,18 +352,46 @@ function renderEquipo() {
   }).join('')
 }
 
+// ─── TIPO DECISION ───────────────────────────────────────────────────────────
+window.setTipoDecision = function (tipo, btn) {
+  if (tipoDecision === tipo) {
+    tipoDecision = null
+    btn.classList.remove('active')
+  } else {
+    tipoDecision = tipo
+    document.querySelectorAll('.td-btn').forEach(b => b.classList.remove('active'))
+    btn.classList.add('active')
+  }
+}
+
 // ─── GUARDAR VISITA ──────────────────────────────────────────────────────────
-window.guardarVisita = async function () {
+window.guardarVisita = async function (conAsignacion = true) {
   const nombre = document.getElementById('f-nombre').value.trim()
   const edad = document.getElementById('f-edad').value
   const genero = document.getElementById('f-genero').value
   const tel = document.getElementById('f-tel').value.trim()
   const fecha = document.getElementById('f-fecha').value
   const notas = document.getElementById('f-notas').value.trim()
+  const direccion = document.getElementById('f-direccion').value.trim()
+  const barrio = document.getElementById('f-barrio').value.trim()
+  const localidad = document.getElementById('f-localidad').value.trim()
+  const tomado_por = document.getElementById('f-tomado-por').value.trim()
+
   if (!nombre||!edad||!genero||!tel||!fecha) { toast('Completá todos los campos obligatorios'); return }
 
-  const enc = asignarEncargado(genero, edad)
-  const payload = { nombre, edad:parseInt(edad), genero, tel, fecha, notas, historial:[], encargado_id: enc?.id||null, encargado_nombre: enc?.nombre||null, creado_por: currentUser.id, estado: 'activa' }
+  let enc = null
+  if (conAsignacion) enc = asignarEncargado(genero, edad)
+
+  const payload = {
+    nombre, edad: parseInt(edad), genero, tel, fecha, notas,
+    direccion, barrio, localidad, tomado_por,
+    tipo_decision: tipoDecision,
+    historial: [],
+    encargado_id: enc?.id || null,
+    encargado_nombre: enc?.nombre || null,
+    creado_por: currentUser.id,
+    estado: 'activa'
+  }
 
   const { data, error } = await sb.from('visitas').insert(payload).select().single()
   if (error) { toast('Error al guardar: '+error.message); console.error(error); return }
@@ -336,12 +404,22 @@ window.guardarVisita = async function () {
     })
   }
 
-  ;['f-nombre','f-edad','f-tel','f-notas'].forEach(id=>document.getElementById(id).value='')
-  document.getElementById('f-genero').value=''
-  document.getElementById('f-fecha').value=new Date().toISOString().split('T')[0]
-  document.getElementById('asig-preview').style.display='none'
-  toast(enc?`Registrado y asignado a ${enc.nombre}`:'Registrado sin encargado disponible')
-  showPage('inicio')
+  ;['f-nombre','f-edad','f-tel','f-notas','f-direccion','f-barrio','f-localidad','f-tomado-por'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.value = ''
+  })
+  document.getElementById('f-genero').value = ''
+  document.getElementById('f-fecha').value = new Date().toISOString().split('T')[0]
+  document.getElementById('asig-preview').style.display = 'none'
+  tipoDecision = null
+  document.querySelectorAll('.td-btn').forEach(b => b.classList.remove('active'))
+
+  if (enc) {
+    toast(`Registrado y asignado a ${enc.nombre}`)
+    showPage('inicio')
+  } else {
+    toast(conAsignacion ? 'Registrado. Sin encargado disponible, quedó pendiente.' : 'Registrado. Pendiente de asignación.')
+    showPage('pendientes')
+  }
 }
 
 // ─── GUARDAR ENCARGADO ───────────────────────────────────────────────────────
@@ -371,7 +449,7 @@ function actualizarPreview() {
     const enc = asignarEncargado(genero, edad)
     preview.style.display = 'block'
     preview.innerHTML = enc
-      ? `✦ Se asignará a <strong>${esc(enc.nombre)}</strong> (${catLabel(enc.cat)})`
+      ? `✦ Asignación sugerida: <strong>${esc(enc.nombre)}</strong> (${catLabel(enc.cat)})`
       : `⚠ Sin encargados disponibles para esta categoría`
   } else preview.style.display = 'none'
 }
@@ -450,6 +528,10 @@ window.abrirModal = function (id) {
       </div>
       <div class="info-row"><span class="info-lbl">Teléfono</span><span class="info-val"><a href="tel:${esc(v.tel)}">${esc(v.tel)}</a></span></div>
       <div class="info-row"><span class="info-lbl">Visita</span><span class="info-val">${fmt(v.fecha)}</span></div>
+      ${v.tipo_decision ? `<div class="info-row"><span class="info-lbl">Decisión</span><span class="info-val"><span class="dec-badge dec-${v.tipo_decision}">${tdLabel(v.tipo_decision)}</span></span></div>` : ''}
+      ${v.tomado_por ? `<div class="info-row"><span class="info-lbl">Datos tomados por</span><span class="info-val">${esc(v.tomado_por)}</span></div>` : ''}
+      ${v.direccion ? `<div class="info-row"><span class="info-lbl">Dirección</span><span class="info-val">${esc(v.direccion)}</span></div>` : ''}
+      ${(v.barrio || v.localidad) ? `<div class="info-row"><span class="info-lbl">Localidad</span><span class="info-val">${[v.barrio, v.localidad].filter(Boolean).map(esc).join(', ')}</span></div>` : ''}
       <div class="info-row"><span class="info-lbl">Encargado</span><span class="info-val">${enc?esc(enc.nombre):'Sin asignar'}</span></div>
       ${v.notas?`<div class="info-row"><span class="info-lbl">Notas</span><span class="info-val">${esc(v.notas)}</span></div>`:''}
     </div>
@@ -515,10 +597,19 @@ window.cambiarEstado = async function (estado) {
 window.reasignarEncargado = async function () {
   if (!modalId) return
   const encId = document.getElementById('sel-encargado').value || null
-  const enc = encargados.find(e=>e.id===encId)
+  const enc = encargados.find(e => e.id === encId)
+  const v = visitas.find(x => x.id === modalId)
+  if (!v) return
   const { error } = await sb.from('visitas').update({ encargado_id: encId, encargado_nombre: enc?.nombre||null }).eq('id', modalId)
   if (error) { toast('Error al reasignar'); return }
-  toast(enc ? `Reasignado a ${enc.nombre}` : 'Encargado removido')
+  if (enc) {
+    await sb.from('notificaciones').insert({
+      para_id: enc.id, para_nombre: enc.nombre, tipo: 'nueva-asignacion',
+      visita_id: v.id, visita_nombre: v.nombre, visita_tel: v.tel,
+      visita_edad: v.edad, visita_genero: v.genero, visita_fecha: v.fecha, leida: false
+    })
+  }
+  toast(enc ? `Asignado a ${enc.nombre}` : 'Encargado removido')
   document.getElementById('modal-bg').classList.remove('open')
 }
 
@@ -604,6 +695,7 @@ function renderPagina(p) {
   else if (p==='mis-asignados') renderMisAsignados()
   else if (p==='todas') renderTodas()
   else if (p==='equipo') renderEquipo()
+  else if (p==='pendientes') renderPendientes()
   else if (p==='notificaciones') renderNotifs()
 }
 

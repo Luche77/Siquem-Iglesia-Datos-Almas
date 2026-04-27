@@ -60,5 +60,15 @@ alter table notificaciones disable row level security;
 alter table visitas add column if not exists estado text default 'activa';
 
 -- ================================================================
+-- MIGRACIÓN: Nuevos campos en visitas
+-- Ejecutar si la tabla ya existe
+-- ================================================================
+alter table visitas add column if not exists direccion text;
+alter table visitas add column if not exists barrio text;
+alter table visitas add column if not exists localidad text;
+alter table visitas add column if not exists tipo_decision text;
+alter table visitas add column if not exists tomado_por text;
+
+-- ================================================================
 -- LISTO. Ahora podés subir la app a Netlify/Vercel.
 -- ================================================================
