@@ -593,23 +593,29 @@ window.guardarModal = async function() {
   const encId = encIdEl ? (encIdEl.value || null) : v.encargado_id
   const enc = encargados.find(e => e.id === encId)
   const estado = modalEstadoPendiente !== null ? modalEstadoPendiente : (v.estado || 'activa')
+  const encCambio = isAdmin && encId && encId !== v.encargado_id
+
+  // Abrir WhatsApp ANTES del primer await para que el navegador no lo bloquee
+  if (encCambio && enc) {
+    const encTel = limTel(enc.tel || '')
+    if (encTel) {
+      const msg = encodeURIComponent(`Hola ${enc.nombre}! Se te asignó a ${nombre} para seguimiento.\nTel: ${tel}\nFecha visita: ${fmt(v.fecha)}${notas ? '\nNotas: ' + notas : ''}`)
+      window.open(`https://wa.me/54${encTel}?text=${msg}`, '_blank')
+    } else {
+      toast(`${enc.nombre} no tiene teléfono registrado`)
+    }
+  }
 
   const updates = { nombre, tel, notas, estado, encargado_id: encId || null, encargado_nombre: enc?.nombre || null }
   const { error } = await sb.from('visitas').update(updates).eq('id', modalId)
   if (error) { toast('Error al guardar: ' + error.message); console.error(error); return }
 
-  const encCambio = isAdmin && encId && encId !== v.encargado_id
   if (encCambio && enc) {
     await sb.from('notificaciones').insert({
       para_id: enc.id, para_nombre: enc.nombre, tipo: 'nueva-asignacion',
       visita_id: v.id, visita_nombre: nombre, visita_tel: tel,
       visita_edad: v.edad, visita_genero: v.genero, visita_fecha: v.fecha, leida: false
     })
-    const encTel = limTel(enc.tel || '')
-    if (encTel) {
-      const msg = encodeURIComponent(`Hola ${enc.nombre}! Se te asignó a ${nombre} para seguimiento.\nTel: ${tel}\nFecha visita: ${fmt(v.fecha)}${notas ? '\nNotas: ' + notas : ''}`)
-      setTimeout(() => window.open(`https://wa.me/54${encTel}?text=${msg}`, '_blank'), 400)
-    }
   }
 
   modalEstadoPendiente = null
