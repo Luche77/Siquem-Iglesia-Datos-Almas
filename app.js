@@ -14,6 +14,7 @@ let filtroMios = 'todos'
 let filtroTodas = 'todas'
 let modalId = null
 let tipoDecision = null
+let modalEstadoPendiente = null
 
 // ─── XSS ────────────────────────────────────────────────────────────────────
 function esc(str) {
@@ -461,10 +462,10 @@ window.abrirModal = function (id) {
   const v = visitas.find(x=>x.id===id)
   if (!v) return
   modalId = id
+  modalEstadoPendiente = null
   const enc = encargados.find(e=>e.id===v.encargado_id)
   const dias = diasSinContacto(v)
   const tel = limTel(v.tel)
-  const cerrada = esCerrada(v)
   const isAdmin = currentUser.rol === 'admin'
 
   const histHTML = v.historial?.length
@@ -476,29 +477,12 @@ window.abrirModal = function (id) {
         </div>`).join('')
     : `<div style="font-size:13px;color:var(--text3);padding:6px 0">Sin contactos registrados aún</div>`
 
-  const estadoHTML = !cerrada
-    ? `<div class="modal-estado-btns">
-        <button class="btn-estado btn-integrado" onclick="cambiarEstado('integrado')">✓ Integrado</button>
-        <button class="btn-estado btn-nc" onclick="cambiarEstado('no-continuo')">✕ No continuó</button>
-       </div>`
-    : `<div class="modal-estado-btns">
-        <div class="estado-tag ${v.estado==='integrado'?'et-integrado':'et-nc'}">${v.estado==='integrado'?'✓ Integrado':'✕ No continuó'}</div>
-        <button class="btn-estado btn-reactivar" onclick="cambiarEstado('activa')">↩ Reactivar</button>
-       </div>`
-
-  const reasignarHTML = isAdmin ? `
-    <div class="modal-section">
-      <div class="modal-section-title">Reasignar encargado</div>
-      <div class="seg-row" style="align-items:flex-end">
-        <div class="field" style="margin-bottom:0">
-          <select id="sel-encargado">
-            <option value="">Sin asignar</option>
-            ${encargados.filter(e=>e.rol!=='admin').map(e=>`<option value="${e.id}"${e.id===v.encargado_id?' selected':''}>${esc(e.nombre)}</option>`).join('')}
-          </select>
-        </div>
-        <button class="btn-primary" style="margin-top:0;width:auto;padding:11px 18px" onclick="reasignarEncargado()">Guardar</button>
-      </div>
-    </div>` : ''
+  const estadoActual = v.estado || 'activa'
+  const estadoHTML = `<div class="modal-estado-btns">
+    <button class="btn-estado btn-activo${estadoActual==='activa'?' sel-estado':''}" onclick="seleccionarEstado('activa',this)">● Activo</button>
+    <button class="btn-estado btn-integrado${estadoActual==='integrado'?' sel-estado':''}" onclick="seleccionarEstado('integrado',this)">✓ Integrado</button>
+    <button class="btn-estado btn-nc${estadoActual==='no-continuo'?' sel-estado':''}" onclick="seleccionarEstado('no-continuo',this)">✕ No continuó</button>
+  </div>`
 
   const eliminarHTML = isAdmin ? `
     <div class="modal-section">
@@ -508,13 +492,18 @@ window.abrirModal = function (id) {
       </button>
     </div>` : ''
 
-  const editHTML = `
+  const formHTML = `
     <div class="modal-section">
-      <div class="modal-section-title">Editar datos</div>
+      ${isAdmin ? `<div class="field" style="margin-bottom:10px"><label>Encargado</label>
+        <select id="sel-encargado">
+          <option value="">Sin asignar</option>
+          ${encargados.filter(e=>e.rol!=='admin').map(e=>`<option value="${e.id}"${e.id===v.encargado_id?' selected':''}>${esc(e.nombre)}</option>`).join('')}
+        </select>
+      </div>` : ''}
       <div class="field" style="margin-bottom:10px"><label>Nombre</label><input id="edit-nombre" type="text" value="${esc(v.nombre)}"></div>
       <div class="field" style="margin-bottom:10px"><label>Teléfono</label><input id="edit-tel" type="tel" value="${esc(v.tel)}"></div>
       <div class="field" style="margin-bottom:10px"><label>Notas</label><textarea id="edit-notas" rows="2">${esc(v.notas||'')}</textarea></div>
-      <button class="btn-primary" style="margin-top:0" onclick="guardarEdicion()">Guardar cambios</button>
+      <button class="btn-primary" style="margin-top:0" onclick="guardarModal()">Guardar cambios</button>
     </div>`
 
   document.getElementById('modal-content').innerHTML = `
@@ -523,7 +512,7 @@ window.abrirModal = function (id) {
         <div class="v-av ${v.genero==='F'?'av-f':'av-m'}" style="width:50px;height:50px;font-size:15px;flex-shrink:0">${initials(v.nombre)}</div>
         <div>
           <div class="modal-nombre">${esc(v.nombre)}</div>
-          <div class="modal-sub">${v.genero==='F'?'Mujer':'Varón'}, ${v.edad} años · ${cerrada?(v.estado==='integrado'?'<span style="color:var(--ok)">Integrado</span>':'<span style="color:var(--text3)">No continuó</span>'):dBadge(dias)}</div>
+          <div class="modal-sub">${v.genero==='F'?'Mujer':'Varón'}, ${v.edad} años · ${dBadge(dias)}</div>
         </div>
       </div>
       <div class="info-row"><span class="info-lbl">Teléfono</span><span class="info-val"><a href="tel:${esc(v.tel)}">${esc(v.tel)}</a></span></div>
@@ -546,13 +535,12 @@ window.abrirModal = function (id) {
         Llamar
       </a>
     </div>
-    ${reasignarHTML}
-    ${editHTML}
+    ${formHTML}
     ${eliminarHTML}
     <div class="seg-section">
       <div class="seg-title">Historial de contactos</div>
       ${histHTML}
-      ${!cerrada ? `<div class="nuevo-seg">
+      ${estadoActual === 'activa' ? `<div class="nuevo-seg">
         <div class="nuevo-seg-title">Registrar nuevo contacto</div>
         <div class="seg-row">
           <div class="field" style="margin-bottom:0"><label>Fecha</label><input id="seg-fecha" type="date" value="${new Date().toISOString().split('T')[0]}"></div>
@@ -583,46 +571,49 @@ window.cerrarModal = function (e) {
     document.getElementById('modal-bg').classList.remove('open')
 }
 
-// ─── CAMBIAR ESTADO ──────────────────────────────────────────────────────────
-window.cambiarEstado = async function (estado) {
-  if (!modalId) return
-  const { error } = await sb.from('visitas').update({ estado }).eq('id', modalId)
-  if (error) { toast('Error al actualizar'); console.error(error); return }
-  document.getElementById('modal-bg').classList.remove('open')
-  const labels = { integrado: 'Marcado como integrado ✓', 'no-continuo': 'Marcado como no continuó', activa: 'Visita reactivada' }
-  toast(labels[estado] || 'Actualizado')
+// ─── SELECCIONAR ESTADO (sin guardar aún) ────────────────────────────────────
+window.seleccionarEstado = function(estado, btn) {
+  modalEstadoPendiente = estado
+  document.querySelectorAll('.btn-estado').forEach(b => b.classList.remove('sel-estado'))
+  btn.classList.add('sel-estado')
 }
 
-// ─── REASIGNAR ENCARGADO ─────────────────────────────────────────────────────
-window.reasignarEncargado = async function () {
+// ─── GUARDAR MODAL (unificado: estado + encargado + datos) ───────────────────
+window.guardarModal = async function() {
   if (!modalId) return
-  const encId = document.getElementById('sel-encargado').value || null
-  const enc = encargados.find(e => e.id === encId)
   const v = visitas.find(x => x.id === modalId)
   if (!v) return
-  const { error } = await sb.from('visitas').update({ encargado_id: encId, encargado_nombre: enc?.nombre||null }).eq('id', modalId)
-  if (error) { toast('Error al reasignar'); return }
-  if (enc) {
-    await sb.from('notificaciones').insert({
-      para_id: enc.id, para_nombre: enc.nombre, tipo: 'nueva-asignacion',
-      visita_id: v.id, visita_nombre: v.nombre, visita_tel: v.tel,
-      visita_edad: v.edad, visita_genero: v.genero, visita_fecha: v.fecha, leida: false
-    })
-  }
-  toast(enc ? `Asignado a ${enc.nombre}` : 'Encargado removido')
-  document.getElementById('modal-bg').classList.remove('open')
-}
-
-// ─── GUARDAR EDICIÓN ─────────────────────────────────────────────────────────
-window.guardarEdicion = async function () {
-  if (!modalId) return
   const nombre = document.getElementById('edit-nombre').value.trim()
   const tel = document.getElementById('edit-tel').value.trim()
   const notas = document.getElementById('edit-notas').value.trim()
   if (!nombre || !tel) { toast('Nombre y teléfono son obligatorios'); return }
-  const { error } = await sb.from('visitas').update({ nombre, tel, notas }).eq('id', modalId)
-  if (error) { toast('Error al guardar'); return }
-  toast('Datos actualizados')
+
+  const isAdmin = currentUser.rol === 'admin'
+  const encIdEl = document.getElementById('sel-encargado')
+  const encId = encIdEl ? (encIdEl.value || null) : v.encargado_id
+  const enc = encargados.find(e => e.id === encId)
+  const estado = modalEstadoPendiente !== null ? modalEstadoPendiente : (v.estado || 'activa')
+
+  const updates = { nombre, tel, notas, estado, encargado_id: encId || null, encargado_nombre: enc?.nombre || null }
+  const { error } = await sb.from('visitas').update(updates).eq('id', modalId)
+  if (error) { toast('Error al guardar: ' + error.message); console.error(error); return }
+
+  const encCambio = isAdmin && encId && encId !== v.encargado_id
+  if (encCambio && enc) {
+    await sb.from('notificaciones').insert({
+      para_id: enc.id, para_nombre: enc.nombre, tipo: 'nueva-asignacion',
+      visita_id: v.id, visita_nombre: nombre, visita_tel: tel,
+      visita_edad: v.edad, visita_genero: v.genero, visita_fecha: v.fecha, leida: false
+    })
+    const encTel = limTel(enc.tel || '')
+    if (encTel) {
+      const msg = encodeURIComponent(`Hola ${enc.nombre}! Se te asignó a ${nombre} para seguimiento.\nTel: ${tel}\nFecha visita: ${fmt(v.fecha)}${notas ? '\nNotas: ' + notas : ''}`)
+      setTimeout(() => window.open(`https://wa.me/54${encTel}?text=${msg}`, '_blank'), 400)
+    }
+  }
+
+  modalEstadoPendiente = null
+  toast('Guardado')
   document.getElementById('modal-bg').classList.remove('open')
 }
 
